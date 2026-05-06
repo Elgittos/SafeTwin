@@ -140,9 +140,6 @@ const formatDate = (value: string | null): string => {
 const normalizePath = (relativePath: string): string =>
   relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
 
-const joinPath = (basePath: string, childName: string): string =>
-  normalizePath(basePath ? `${basePath}/${childName}` : childName);
-
 const parentPath = (relativePath: string): string => {
   const normalized = normalizePath(relativePath);
   const slashIndex = normalized.lastIndexOf('/');
@@ -348,80 +345,64 @@ const buildPaneRows = (
     });
   }
 
-  if (!scanResult) {
-    const previewRows: PaneRow[] = previewEntries.map((entry) =>
-      entry.kind === 'folder'
-        ? {
-            kind: 'previewFolder',
-            side,
-            relativePath: normalizePath(entry.relativePath),
-            name: entry.name,
-            displayPath: normalizePath(entry.relativePath),
-          }
-        : {
-            kind: 'previewFile',
-            side,
-            relativePath: normalizePath(entry.relativePath),
-            name: entry.name,
-            displayPath: normalizePath(entry.relativePath),
-            absolutePath: entry.absolutePath,
-            sizeBytes: entry.sizeBytes,
-          },
-    );
+  const folderCounts = new Map((scanResult?.folders ?? []).map((folder) => [normalizePath(folder.relativePath), folder.counts]));
+  const scanFilesByPath = new Map(
+    (scanResult?.files ?? [])
+      .filter((file) => fileVisibleOnSide(file, side))
+      .map((file) => [normalizePath(file.displayPath).toLowerCase(), file]),
+  );
 
-    return [...rows, ...previewRows].filter((row) => matchesFilter(row, filter, failedPaths) && matchesSearch(row, search));
-  }
+  const liveRows: PaneRow[] = previewEntries.map((entry) => {
+    const relativePath = normalizePath(entry.relativePath);
 
-  const folderCounts = new Map(scanResult.folders.map((folder) => [normalizePath(folder.relativePath), folder.counts]));
+    if (entry.kind === 'folder') {
+      if (scanResult) {
+        return {
+          kind: 'folder',
+          side,
+          relativePath,
+          name: entry.name,
+          displayPath: relativePath,
+          counts: folderCounts.get(relativePath) ?? emptySummary(),
+          failedCount: descendantCount(failedPaths, relativePath),
+        };
+      }
 
-  const childFolders = new Set<string>();
-
-  for (const file of scanResult.files) {
-    if (!fileVisibleOnSide(file, side)) {
-      continue;
+      return {
+        kind: 'previewFolder',
+        side,
+        relativePath,
+        name: entry.name,
+        displayPath: relativePath,
+      };
     }
 
-    const normalizedFilePath = normalizePath(file.displayPath);
-    const inCurrent =
-      !normalizedCurrent || normalizedFilePath === normalizedCurrent || normalizedFilePath.startsWith(`${normalizedCurrent}/`);
+    const scannedFile = scanFilesByPath.get(relativePath.toLowerCase());
 
-    if (!inCurrent) {
-      continue;
+    if (scannedFile) {
+      return {
+        kind: 'file',
+        side,
+        relativePath: scannedFile.relativePath,
+        name: entry.name,
+        displayPath: scannedFile.displayPath,
+        file: scannedFile,
+        operationItem: operationByPath.get(normalizePath(scannedFile.relativePath).toLowerCase()) ?? null,
+      };
     }
 
-    const remainder = normalizedCurrent ? normalizedFilePath.slice(normalizedCurrent.length + 1) : normalizedFilePath;
-    const firstSegment = remainder.split('/')[0];
-
-    if (firstSegment && remainder.includes('/')) {
-      childFolders.add(joinPath(normalizedCurrent, firstSegment));
-    }
-  }
-
-  const folderRows: FolderRow[] = [...childFolders].sort().map((relativePath) => ({
-    kind: 'folder',
-    side,
-    relativePath,
-    name: basename(relativePath),
-    displayPath: relativePath,
-    counts: folderCounts.get(relativePath) ?? emptySummary(),
-    failedCount: descendantCount(failedPaths, relativePath),
-  }));
-
-  const fileRows: FileRow[] = scanResult.files
-    .filter((file) => fileVisibleOnSide(file, side))
-    .filter((file) => parentPath(file.displayPath) === normalizedCurrent)
-    .sort((left, right) => basename(left.displayPath).localeCompare(basename(right.displayPath)))
-    .map((file) => ({
-      kind: 'file',
+    return {
+      kind: 'previewFile',
       side,
-      relativePath: file.relativePath,
-      name: basename(file.displayPath),
-      displayPath: file.displayPath,
-      file,
-      operationItem: operationByPath.get(normalizePath(file.relativePath).toLowerCase()) ?? null,
-    }));
+      relativePath,
+      name: entry.name,
+      displayPath: relativePath,
+      absolutePath: entry.absolutePath,
+      sizeBytes: entry.sizeBytes,
+    };
+  });
 
-  return [...rows, ...folderRows, ...fileRows].filter(
+  return [...rows, ...liveRows].filter(
     (row) => matchesFilter(row, filter, failedPaths) && matchesSearch(row, search),
   );
 };
