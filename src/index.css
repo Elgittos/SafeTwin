@@ -14,8 +14,9 @@
 
 body {
   margin: 0;
-  min-width: 1120px;
-  min-height: 720px;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }
 
 button,
@@ -35,9 +36,12 @@ input:disabled {
 }
 
 .app-frame {
-  display: grid;
-  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   color: #1f2937;
   background: #eef2f6;
 }
@@ -49,11 +53,11 @@ input:disabled {
 
 .app-topbar {
   display: grid;
-  grid-template-columns: 260px minmax(360px, 1fr) auto;
-  gap: 16px;
+  grid-template-columns: minmax(150px, 220px) minmax(260px, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  min-height: 66px;
-  padding: 10px 16px;
+  min-height: 48px;
+  padding: 6px 12px;
   border-bottom: 1px solid #d4dbe5;
   background: #f8fafc;
 }
@@ -65,7 +69,7 @@ input:disabled {
 
 .title-block h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 750;
 }
 
@@ -86,15 +90,16 @@ input:disabled {
 
 .pair-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(240px, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(180px, 260px) minmax(180px, 1fr);
+  gap: 8px;
+  min-width: 0;
 }
 
 input,
 select {
   width: 100%;
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 8px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   color: #1f2937;
@@ -133,8 +138,8 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 8px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   color: #263244;
@@ -157,7 +162,7 @@ select {
 }
 
 .toolbar {
-  padding: 9px 16px;
+  padding: 5px 12px;
   border-bottom: 1px solid #d4dbe5;
   background: #f3f6fa;
 }
@@ -201,9 +206,9 @@ select {
 .status-strip {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 34px;
-  padding: 0 16px;
+  gap: 12px;
+  min-height: 26px;
+  padding: 0 12px;
   border-bottom: 1px solid #dce3ec;
   background: #ffffff;
   white-space: nowrap;
@@ -220,8 +225,8 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
-  padding: 8px 16px;
+  min-height: 30px;
+  padding: 6px 12px;
   border-bottom: 1px solid #ead79a;
   color: #6d4a00;
   background: #fff8dc;
@@ -237,7 +242,7 @@ select {
 .scan-progress {
   display: grid;
   gap: 3px;
-  padding: 8px 16px;
+  padding: 5px 12px;
   border-bottom: 1px solid #b8d7f0;
   color: #184f72;
   background: #e8f5ff;
@@ -271,9 +276,11 @@ select {
 
 .workspace-tools {
   justify-content: space-between;
-  padding: 9px 16px;
+  padding: 5px 12px;
   border-bottom: 1px solid #d4dbe5;
   background: #f8fafc;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .theme-dark .workspace-tools {
@@ -290,10 +297,10 @@ select {
 
 .search-box {
   display: grid;
-  grid-template-columns: 18px minmax(220px, 320px);
+  grid-template-columns: 18px minmax(160px, 1fr);
   align-items: center;
   gap: 6px;
-  min-height: 32px;
+  min-height: 28px;
   padding: 0 8px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
@@ -306,15 +313,15 @@ select {
 }
 
 .search-box input {
-  min-height: 28px;
+  min-height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
 }
 
 .selection-bar {
-  min-height: 42px;
-  padding: 6px 16px;
+  min-height: 34px;
+  padding: 4px 12px;
   border-bottom: 1px solid #d4dbe5;
   background: #ffffff;
 }
@@ -331,7 +338,37 @@ select {
 
 .selection-bar select {
   width: 130px;
-  min-height: 32px;
+  min-height: 28px;
+}
+
+.action-menu {
+  width: 112px;
+  min-height: 28px;
+  font-weight: 650;
+}
+
+.compact-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.compact-field select {
+  width: 132px;
+}
+
+.selection-summary,
+.marker-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .cleanup-preview,
@@ -362,7 +399,9 @@ select {
 .path-panels {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .pane-divider {
@@ -389,8 +428,8 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 58px;
-  padding: 10px 12px;
+  min-height: 42px;
+  padding: 6px 10px;
   border-bottom: 1px solid #dce3ec;
   background: #f8fafc;
 }
@@ -425,8 +464,8 @@ select {
   grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  min-height: 38px;
-  padding: 4px 10px;
+  min-height: 30px;
+  padding: 2px 8px;
   border-bottom: 1px solid #edf1f5;
 }
 
@@ -435,8 +474,8 @@ select {
 }
 
 .breadcrumb button {
-  width: 30px;
-  min-height: 28px;
+  width: 28px;
+  min-height: 26px;
   padding: 0;
 }
 
@@ -447,12 +486,12 @@ select {
 
 .explorer-row {
   display: grid;
-  grid-template-columns: 24px 24px minmax(160px, 1fr) minmax(80px, auto) 82px;
+  grid-template-columns: 22px 22px minmax(120px, 1fr) minmax(74px, auto) 72px;
   align-items: center;
   gap: 6px;
   width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 8px;
   border: 0;
   border-bottom: 1px solid #f1f5f9;
   border-radius: 0;
@@ -665,11 +704,11 @@ select {
 
 .operation-drawer {
   display: grid;
-  grid-template-columns: 190px auto minmax(280px, 1fr) minmax(360px, 1.5fr);
+  grid-template-columns: 150px auto minmax(220px, 1fr) minmax(260px, 1.3fr);
   align-items: center;
   gap: 12px;
-  min-height: 92px;
-  padding: 10px 16px;
+  min-height: 78px;
+  padding: 8px 12px;
   border-top: 1px solid #cbd5e1;
   background: #f8fafc;
 }

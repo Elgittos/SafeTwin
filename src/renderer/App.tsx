@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
-  ArrowLeftRight,
   Check,
   CheckSquare,
   ChevronLeft,
@@ -36,6 +35,7 @@ import {
 import type {
   CleanupPreview,
   DirectoryPreviewEntry,
+  DirectoryDiffSummary,
   FileCompareItem,
   FolderPair,
   IgnoreRuleSetting,
@@ -53,7 +53,15 @@ type PaneSide = 'origin' | 'backup';
 type ThemeMode = 'light' | 'dark';
 type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
 
-const autoScanSessionKeys = new Set<string>();
+const filterOptions: Array<[FilterKey, string]> = [
+  ['missing', 'Ready to copy'],
+  ['conflicts', 'Conflicts'],
+  ['backupOnly', 'Backup-only'],
+  ['ignored', 'Ignored'],
+  ['skipped', 'Skipped'],
+  ['failed', 'Failed'],
+  ['all', 'All'],
+];
 
 interface CopyPreview {
   filesSelected: number;
@@ -421,6 +429,7 @@ const buildPaneRows = (
   scanResult: ScanResult | null,
   previewEntries: DirectoryPreviewEntry[],
   oppositePreviewEntries: DirectoryPreviewEntry[],
+  quickFolderSummaries: DirectoryDiffSummary[],
   operationByPath: Map<string, OperationQueueItem>,
   failedPaths: Set<string>,
   filter: FilterKey,
@@ -439,7 +448,12 @@ const buildPaneRows = (
     });
   }
 
-  const folderCounts = new Map((scanResult?.folders ?? []).map((folder) => [normalizePath(folder.relativePath), folder.counts]));
+  const folderCounts = new Map(
+    (scanResult?.folders ?? []).map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder.counts]),
+  );
+  const quickFolderCounts = new Map(
+    quickFolderSummaries.map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder.counts]),
+  );
   const scanFilesByPath = new Map(
     (scanResult?.files ?? [])
       .filter((file) => fileVisibleOnSide(file, side))
@@ -453,30 +467,27 @@ const buildPaneRows = (
     const relativePath = normalizePath(entry.relativePath);
 
     if (entry.kind === 'folder') {
-      if (scanResult) {
-        return {
-          kind: 'folder',
-          side,
-          relativePath,
-          name: entry.name,
-          displayPath: relativePath,
-          counts: folderCounts.get(relativePath) ?? emptySummary(),
-          failedCount: descendantCount(failedPaths, relativePath),
-        };
-      }
-
       return {
-        kind: 'previewFolder',
+        kind: 'folder',
         side,
         relativePath,
         name: entry.name,
         displayPath: relativePath,
+        counts:
+          quickFolderCounts.get(relativePath.toLowerCase()) ??
+          folderCounts.get(relativePath.toLowerCase()) ??
+          emptySummary(),
+        failedCount: descendantCount(failedPaths, relativePath),
       };
     }
 
+    const liveFile = createLiveCompareItem(side, entry, oppositePreviewByPath.get(relativePath.toLowerCase()) ?? null);
     const scannedFile = scanFilesByPath.get(relativePath.toLowerCase());
 
-    if (scannedFile) {
+    if (
+      scannedFile &&
+      ['ignored', 'notLocalPlaceholder', 'lockedOrUnreadable', 'unstableChangingFile'].includes(scannedFile.state)
+    ) {
       return {
         kind: 'file',
         side,
@@ -487,8 +498,6 @@ const buildPaneRows = (
         operationItem: operationByPath.get(normalizePath(scannedFile.relativePath).toLowerCase()) ?? null,
       };
     }
-
-    const liveFile = createLiveCompareItem(side, entry, oppositePreviewByPath.get(relativePath.toLowerCase()) ?? null);
 
     return {
       kind: 'file',
@@ -640,6 +649,8 @@ const App = () => {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
+  const [quickFolderSummaries, setQuickFolderSummaries] = useState<DirectoryDiffSummary[]>([]);
+  const [isLoadingMarkers, setIsLoadingMarkers] = useState(false);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
   const [operationHistory, setOperationHistory] = useState<OperationSnapshot[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
@@ -686,12 +697,23 @@ const App = () => {
         scanResult,
         originPreviewEntries,
         backupPreviewEntries,
+        quickFolderSummaries,
         operationByPath,
         failedPaths,
         filter,
         search,
       ),
-    [backupPreviewEntries, failedPaths, filter, leftPath, operationByPath, originPreviewEntries, scanResult, search],
+    [
+      backupPreviewEntries,
+      failedPaths,
+      filter,
+      leftPath,
+      operationByPath,
+      originPreviewEntries,
+      quickFolderSummaries,
+      scanResult,
+      search,
+    ],
   );
   const rightRows = useMemo(
     () =>
@@ -701,12 +723,23 @@ const App = () => {
         scanResult,
         backupPreviewEntries,
         originPreviewEntries,
+        quickFolderSummaries,
         operationByPath,
         failedPaths,
         filter,
         search,
       ),
-    [backupPreviewEntries, failedPaths, filter, operationByPath, originPreviewEntries, rightPath, scanResult, search],
+    [
+      backupPreviewEntries,
+      failedPaths,
+      filter,
+      operationByPath,
+      originPreviewEntries,
+      quickFolderSummaries,
+      rightPath,
+      scanResult,
+      search,
+    ],
   );
   const selectedFiles = useMemo(() => {
     const selected = new Set(selectedPaths);
@@ -846,14 +879,6 @@ const App = () => {
     }
   };
 
-  const scanPairInBackground = async (pair: FolderPair, mode: ScanMode = 'metadata') => {
-    if (isScanning) {
-      return;
-    }
-
-    await scanSavedPair(pair, mode);
-  };
-
   const loadPairState = async (pair: FolderPair) => {
     setActivePairId(pair.id);
     setOriginPath(pair.originPath);
@@ -900,21 +925,6 @@ const App = () => {
   useEffect(() => {
     window.localStorage.setItem('safetwin-theme', theme);
   }, [theme]);
-
-  useEffect(() => {
-    if (!activePair || !originPath || !backupPath || isScanning) {
-      return;
-    }
-
-    const autoScanKey = `${activePair.id}:${originPath}:${backupPath}`;
-
-    if (autoScanSessionKeys.has(autoScanKey)) {
-      return;
-    }
-
-    autoScanSessionKeys.add(autoScanKey);
-    void scanPairInBackground(activePair);
-  }, [activePair, backupPath, isScanning, originPath]);
 
   useEffect(() => {
     let canceled = false;
@@ -969,6 +979,45 @@ const App = () => {
       canceled = true;
     };
   }, [backupPath, rightPath]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (!activePairId || !originPath || !backupPath) {
+      setQuickFolderSummaries([]);
+      setIsLoadingMarkers(false);
+      return undefined;
+    }
+
+    const pathsToSummarize = [...new Set([leftPath, rightPath].map(normalizePath))];
+    setIsLoadingMarkers(true);
+
+    Promise.all(
+      pathsToSummarize.map((relativePath) =>
+        window.safetwin.summarizeDirectoryDifferences(activePairId, relativePath),
+      ),
+    )
+      .then((results) => {
+        if (!canceled) {
+          setQuickFolderSummaries(results.flat());
+        }
+      })
+      .catch((markerError: unknown) => {
+        if (!canceled) {
+          setQuickFolderSummaries([]);
+          setError(toFriendlyError(markerError, 'Could not load difference markers.'));
+        }
+      })
+      .finally(() => {
+        if (!canceled) {
+          setIsLoadingMarkers(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [activePairId, backupPath, leftPath, originPath, rightPath]);
 
   useEffect(() => {
     if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
@@ -1287,6 +1336,27 @@ const App = () => {
     }
   };
 
+  const runMoreAction = (action: string) => {
+    if (action === 'swap') {
+      void swapRoles();
+      return;
+    }
+
+    if (action === 'selectVisible') {
+      selectVisibleEligible();
+      return;
+    }
+
+    if (action === 'clearSelection') {
+      clearSelection();
+      return;
+    }
+
+    if (action === 'copyConflicts') {
+      void createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath));
+    }
+  };
+
   const groupedIgnoreRules = useMemo(() => {
     const groups = new Map<string, IgnoreRuleSetting[]>();
 
@@ -1459,10 +1529,6 @@ const App = () => {
           <HardDrive size={16} aria-hidden="true" />
           Deep Scan
         </button>
-        <button type="button" onClick={swapRoles} disabled={!originPath || !backupPath || isScanning}>
-          <ArrowLeftRight size={16} aria-hidden="true" />
-          Swap Roles
-        </button>
         <button
           type="button"
           onClick={() =>
@@ -1472,6 +1538,19 @@ const App = () => {
         >
           <Copy size={16} aria-hidden="true" />
           Copy Ready
+        </button>
+        <button
+          className={selectionMode ? 'toolbar-active' : ''}
+          type="button"
+          onClick={() => {
+            setSelectionMode((current) => !current);
+            setSelectedPaths([]);
+            setSelectedFolderPaths([]);
+            setCleanupPreview(null);
+          }}
+        >
+          <CheckSquare size={16} aria-hidden="true" />
+          Select
         </button>
         <button
           className={cleanupMode ? 'toolbar-active' : ''}
@@ -1491,6 +1570,27 @@ const App = () => {
           <Settings size={16} aria-hidden="true" />
           Settings
         </button>
+        <select
+          aria-label="More actions"
+          className="action-menu"
+          value=""
+          onChange={(event) => {
+            runMoreAction(event.target.value);
+            event.target.value = '';
+          }}
+        >
+          <option value="">More</option>
+          <option value="swap" disabled={!originPath || !backupPath || isScanning}>
+            Swap roles
+          </option>
+          <option value="selectVisible">Select visible</option>
+          <option value="clearSelection" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0}>
+            Clear selection
+          </option>
+          <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
+            Copy selected conflicts
+          </option>
+        </select>
         <label className="mirror-toggle">
           <input
             type="checkbox"
@@ -1517,6 +1617,12 @@ const App = () => {
         <span>Conflicts: {scanResult?.summary.conflicts ?? 0}</span>
         <span>Ignored: {scanResult?.summary.ignored ?? 0}</span>
         <span>Skipped: {skippedCount(scanResult?.summary ?? emptySummary())}</span>
+        {isLoadingMarkers ? (
+          <span className="marker-loading">
+            <Loader2 className="spin" size={12} aria-hidden="true" />
+            Updating markers
+          </span>
+        ) : null}
       </section>
 
       {reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
@@ -1545,26 +1651,20 @@ const App = () => {
       ) : null}
 
       <section className="workspace-tools">
-        <div className="filter-group">
-          {[
-            ['missing', 'Ready to copy'],
-            ['conflicts', 'Conflicts'],
-            ['backupOnly', 'Backup-only'],
-            ['ignored', 'Ignored'],
-            ['skipped', 'Skipped'],
-            ['failed', 'Failed'],
-            ['all', 'All'],
-          ].map(([value, label]) => (
-            <button
-              className={filter === value ? 'filter-chip filter-chip-active' : 'filter-chip'}
-              key={value}
-              type="button"
-              onClick={() => setFilter(value as FilterKey)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <label className="compact-field">
+          View
+          <select
+            aria-label="View filter"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value as FilterKey)}
+          >
+            {filterOptions.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="search-box">
           <Search size={15} aria-hidden="true" />
@@ -1574,39 +1674,24 @@ const App = () => {
             placeholder="Search"
           />
         </div>
-      </section>
 
-      <section className="selection-bar">
-        <button
-          type="button"
-          onClick={() => {
-            setSelectionMode((current) => !current);
-            setSelectedPaths([]);
-            setSelectedFolderPaths([]);
-            setCleanupPreview(null);
-          }}
-        >
-          Select
-        </button>
-        <button type="button" disabled={!scanResult} onClick={selectVisibleEligible}>
-          <CheckSquare size={15} aria-hidden="true" />
-          Select visible
-        </button>
-        <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
-          Clear
-        </button>
-        <span>
+        <span className="selection-summary">
           {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
         </span>
-        <select
-          aria-label="Verification level"
-          value={verificationLevel}
-          onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
-        >
-          <option value="auto">Auto verify</option>
-          <option value="basic">Size verify</option>
-          <option value="strong">Hash verify</option>
-        </select>
+
+        <label className="compact-field">
+          Verify
+          <select
+            aria-label="Verification level"
+            value={verificationLevel}
+            onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
+          >
+            <option value="auto">Auto</option>
+            <option value="basic">Size</option>
+            <option value="strong">Hash</option>
+          </select>
+        </label>
+
         <button
           type="button"
           disabled={cleanupMode || (copySelectedFiles.length === 0 && selectedFolderPaths.length === 0)}
@@ -1614,20 +1699,6 @@ const App = () => {
         >
           Copy selected
         </button>
-        <button
-          type="button"
-          disabled={copyReadyFiles.length === 0}
-          onClick={() =>
-            createCopyQueue(copyReadyFiles.map((file) => file.relativePath))
-          }
-        >
-          Copy all ready
-        </button>
-        {filter === 'missing' ? null : (
-          <button type="button" disabled={cleanupMode || conflictSelectedFiles.length === 0} onClick={() => createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath))}>
-            Copy selected conflicts as duplicates
-          </button>
-        )}
         {cleanupMode ? (
           <>
             <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>

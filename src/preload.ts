@@ -13,6 +13,8 @@ const api: SafeTwinApi = {
   chooseFolder: () => ipcRenderer.invoke('safetwin:choose-folder'),
   listDirectory: (rootPath: string, relativePath = '') =>
     ipcRenderer.invoke('safetwin:list-directory', rootPath, relativePath),
+  summarizeDirectoryDifferences: (folderPairId: number, relativePath = '') =>
+    ipcRenderer.invoke('safetwin:summarize-directory-differences', folderPairId, relativePath),
   listFolderPairs: () => ipcRenderer.invoke('safetwin:list-folder-pairs'),
   saveFolderPair: (input: SaveFolderPairInput) => ipcRenderer.invoke('safetwin:save-folder-pair', input),
   updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) =>

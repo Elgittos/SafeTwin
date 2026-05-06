@@ -16,6 +16,7 @@ import { OperationLogger } from './operations/operationLogger';
 import { OperationQueueService } from './operations/operationQueueService';
 import { isProtectedWindowsDirectoryName } from './platform/protectedWindowsPaths';
 import { ScannerService } from './scanner/scannerService';
+import { summarizeDirectoryDifferences } from './scanner/quickDiffService';
 import { FolderPairService } from './services/folderPairService';
 
 const yieldToEventLoop = async (): Promise<void> =>
@@ -107,6 +108,11 @@ export const registerIpcHandlers = async (): Promise<void> => {
 
       return left.name.localeCompare(right.name);
     });
+  });
+
+  ipcMain.handle('safetwin:summarize-directory-differences', async (_event, pairId: number, relativePath = '') => {
+    const pair = folderPairs.getFolderPair(pairId);
+    return summarizeDirectoryDifferences(pair, relativePath, ignoreRules);
   });
 
   ipcMain.handle('safetwin:list-folder-pairs', () => folderPairs.listFolderPairs());

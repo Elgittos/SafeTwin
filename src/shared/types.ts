@@ -99,6 +99,12 @@ export interface FolderCompareItem {
   counts: ScanSummary;
 }
 
+export interface DirectoryDiffSummary {
+  relativePath: string;
+  displayPath: string;
+  counts: ScanSummary;
+}
+
 export interface ScanResult {
   scanRunId: number;
   folderPairId: number;
@@ -235,6 +241,7 @@ export interface DirectoryPreviewEntry {
 export interface SafeTwinApi {
   chooseFolder: () => Promise<ChooseFolderResult>;
   listDirectory: (rootPath: string, relativePath?: string) => Promise<DirectoryPreviewEntry[]>;
+  summarizeDirectoryDifferences: (folderPairId: number, relativePath?: string) => Promise<DirectoryDiffSummary[]>;
   listFolderPairs: () => Promise<FolderPair[]>;
   saveFolderPair: (input: SaveFolderPairInput) => Promise<FolderPair>;
   updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) => Promise<FolderPair>;
