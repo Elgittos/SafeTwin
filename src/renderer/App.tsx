@@ -762,9 +762,8 @@ const App = () => {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
-  const [quickFolderSummaries, setQuickFolderSummaries] = useState<DirectoryDiffSummary[]>([]);
+  const quickFolderSummaries = useMemo<DirectoryDiffSummary[]>(() => [], []);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [isLoadingMarkers, setIsLoadingMarkers] = useState(false);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
   const [operationHistory, setOperationHistory] = useState<OperationSnapshot[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
@@ -885,13 +884,23 @@ const App = () => {
   );
   const lastCopyAt = useMemo(
     () =>
-      operationHistory.find((snapshot) => snapshot.operation.type === 'copy' && snapshot.operation.completedAt)
+      operationHistory.find(
+        (snapshot) =>
+          snapshot.operation.type === 'copy' &&
+          snapshot.operation.state === 'completed' &&
+          snapshot.operation.completedAt,
+      )
         ?.operation.completedAt ?? null,
     [operationHistory],
   );
   const lastCleanupAt = useMemo(
     () =>
-      operationHistory.find((snapshot) => snapshot.operation.type === 'cleanup' && snapshot.operation.completedAt)
+      operationHistory.find(
+        (snapshot) =>
+          snapshot.operation.type === 'cleanup' &&
+          snapshot.operation.state === 'completed' &&
+          snapshot.operation.completedAt,
+      )
         ?.operation.completedAt ?? null,
     [operationHistory],
   );
@@ -914,12 +923,20 @@ const App = () => {
   }, [activePair]);
   const liveStatusSummary = useMemo(() => {
     const currentKey = normalizePath(leftPath).toLowerCase();
+    if (!scanResult) {
+      return null;
+    }
+
+    if (!currentKey) {
+      return scanResult.summary;
+    }
+
     return (
-      quickFolderSummaries.find((folder) => normalizePath(folder.relativePath).toLowerCase() === currentKey)
-        ?.counts ?? null
+      scanResult.folders.find((folder) => normalizePath(folder.relativePath).toLowerCase() === currentKey)?.counts ??
+      null
     );
-  }, [leftPath, quickFolderSummaries]);
-  const statusSummary = liveStatusSummary ?? scanResult?.summary ?? emptySummary();
+  }, [leftPath, scanResult]);
+  const statusSummary = liveStatusSummary ?? emptySummary();
 
   const savePairWithPaths = async (
     nextOriginPath: string,
@@ -939,8 +956,7 @@ const App = () => {
       reminderIntervalDays: activePair?.reminderIntervalDays ?? null,
     };
     const savedPair = await window.safetwin.saveFolderPair(input);
-    const nextPairs = await window.safetwin.listFolderPairs();
-    setPairs(nextPairs);
+    setPairs([savedPair]);
     setActivePairId(savedPair.id);
     setOriginPath(savedPair.originPath);
     setBackupPath(savedPair.backupPath);
@@ -972,8 +988,7 @@ const App = () => {
       setSelectedPaths([]);
       setSelectedFolderPaths([]);
       setCleanupPreview(null);
-      const nextPairs = await window.safetwin.listFolderPairs();
-      setPairs(nextPairs);
+      setPairs([{ ...pair, lastScanAt: result.completedAt }]);
       setActivePairId(pair.id);
       setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
     } catch (scanError) {
@@ -984,39 +999,8 @@ const App = () => {
     }
   };
 
-  const loadPairState = async (pair: FolderPair) => {
-    setActivePairId(pair.id);
-    setOriginPath(pair.originPath);
-    setBackupPath(pair.backupPath);
-    setPairName(pair.name);
-    setLeftPath('');
-    setRightPath('');
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCopyPreview(null);
-    setCleanupPreview(null);
-    setError(null);
-
-    const status = await window.safetwin.getLastStatus(pair.id);
-    setScanResult(status.lastScan);
-    const operations = await window.safetwin.listOperations(pair.id);
-    setOperationHistory(operations);
-    setOperation(operations[0] ?? null);
-    setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
-
-  };
-
-  const loadPairs = async () => {
-    const nextPairs = await window.safetwin.listFolderPairs();
-    setPairs(nextPairs);
-
-    if (!activePairId && nextPairs.length > 0) {
-      await loadPairState(nextPairs[0]);
-    }
-  };
-
   useEffect(() => {
-    Promise.all([loadPairs(), window.safetwin.listIgnoreRules().then(setIgnoreRules)]).catch((loadError: unknown) => {
+    window.safetwin.listIgnoreRules().then(setIgnoreRules).catch((loadError: unknown) => {
       setError(toFriendlyError(loadError, 'Could not load SafeTwin data.'));
     });
   }, []);
@@ -1086,45 +1070,6 @@ const App = () => {
   }, [backupPath, refreshToken, rightPath]);
 
   useEffect(() => {
-    let canceled = false;
-
-    if (!activePairId || !originPath || !backupPath) {
-      setQuickFolderSummaries([]);
-      setIsLoadingMarkers(false);
-      return undefined;
-    }
-
-    const pathsToSummarize = [...new Set([leftPath, rightPath].map(normalizePath))];
-    setIsLoadingMarkers(true);
-
-    Promise.all(
-      pathsToSummarize.map((relativePath) =>
-        window.safetwin.summarizeDirectoryDifferences(activePairId, relativePath),
-      ),
-    )
-      .then((results) => {
-        if (!canceled) {
-          setQuickFolderSummaries(results.flat());
-        }
-      })
-      .catch((markerError: unknown) => {
-        if (!canceled) {
-          setQuickFolderSummaries([]);
-          setError(toFriendlyError(markerError, 'Could not load difference markers.'));
-        }
-      })
-      .finally(() => {
-        if (!canceled) {
-          setIsLoadingMarkers(false);
-        }
-      });
-
-    return () => {
-      canceled = true;
-    };
-  }, [activePairId, backupPath, leftPath, originPath, refreshToken, rightPath]);
-
-  useEffect(() => {
     if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
       return undefined;
     }
@@ -1137,6 +1082,7 @@ const App = () => {
 
           if (nextOperation.operation.state === 'completed' && activePairId) {
             const status = await window.safetwin.getLastStatus(activePairId);
+            setPairs([status.folderPair]);
             setScanResult(status.lastScan);
             setSelectedPaths([]);
             setSelectedFolderPaths([]);
@@ -1165,8 +1111,7 @@ const App = () => {
 
     const nextOriginPath = side === 'origin' ? result.path : originPath;
     const nextBackupPath = side === 'backup' ? result.path : backupPath;
-    const nextPairName =
-      pairName || (nextOriginPath && nextBackupPath ? getDefaultPairName(nextOriginPath, nextBackupPath) : '');
+    const nextPairName = nextOriginPath && nextBackupPath ? getDefaultPairName(nextOriginPath, nextBackupPath) : '';
 
     setOriginPath(nextOriginPath);
     setBackupPath(nextBackupPath);
@@ -1183,7 +1128,7 @@ const App = () => {
       try {
         await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
       } catch (folderError) {
-        setError(toFriendlyError(folderError, 'Could not save selected folders.'));
+        setError(toFriendlyError(folderError, 'Could not use selected folders.'));
       }
     }
   };
@@ -1217,7 +1162,7 @@ const App = () => {
   };
 
   const savePair = async (): Promise<FolderPair> => {
-    return savePairWithPaths(originPath, backupPath, pairName);
+    return savePairWithPaths(originPath, backupPath, pairName || getDefaultPairName(originPath, backupPath));
   };
 
   const scan = async (mode: ScanMode = 'metadata') => {
@@ -1265,7 +1210,7 @@ const App = () => {
       const updatedPair = await window.safetwin.updateFolderPairSettings({ id: activePairId, ...patch });
       setPairs((current) => current.map((pair) => (pair.id === updatedPair.id ? updatedPair : pair)));
     } catch (settingsError) {
-      setError(toFriendlyError(settingsError, 'Could not update folder-pair settings.'));
+      setError(toFriendlyError(settingsError, 'Could not update settings.'));
     }
   };
 
@@ -1882,12 +1827,6 @@ const App = () => {
         <span>Conflicts: {statusSummary.conflicts}</span>
         <span>Ignored: {statusSummary.ignored}</span>
         <span>Skipped: {skippedCount(statusSummary)}</span>
-        {isLoadingMarkers ? (
-          <span className="marker-loading">
-            <Loader2 className="spin" size={12} aria-hidden="true" />
-            Updating markers
-          </span>
-        ) : null}
       </section>
 
       {reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}

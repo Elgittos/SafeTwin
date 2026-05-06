@@ -116,8 +116,6 @@ export const registerIpcHandlers = async (): Promise<void> => {
     return summarizeDirectoryDifferences(pair, relativePath, ignoreRules);
   });
 
-  ipcMain.handle('safetwin:list-folder-pairs', () => folderPairs.listFolderPairs());
-
   ipcMain.handle('safetwin:save-folder-pair', (_event, input: SaveFolderPairInput) =>
     folderPairs.saveFolderPair(input),
   );

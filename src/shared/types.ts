@@ -258,7 +258,6 @@ export interface SafeTwinApi {
   chooseFolder: () => Promise<ChooseFolderResult>;
   listDirectory: (rootPath: string, relativePath?: string) => Promise<DirectoryPreviewEntry[]>;
   summarizeDirectoryDifferences: (folderPairId: number, relativePath?: string) => Promise<DirectoryDiffSummary[]>;
-  listFolderPairs: () => Promise<FolderPair[]>;
   saveFolderPair: (input: SaveFolderPairInput) => Promise<FolderPair>;
   updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) => Promise<FolderPair>;
   listIgnoreRules: () => Promise<IgnoreRuleSetting[]>;
