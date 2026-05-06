@@ -5,6 +5,7 @@ import type {
   CleanupPreviewInput,
   CreateCleanupOperationInput,
   CreateCopyOperationInput,
+  CreateSingleCopyOperationInput,
   SaveFolderPairInput,
   ScanMode,
   UpdateFolderPairSettingsInput,
@@ -148,6 +149,10 @@ export const registerIpcHandlers = async (): Promise<void> => {
 
   ipcMain.handle('safetwin:create-copy-operation', (_event, input: CreateCopyOperationInput) =>
     operations.createCopyOperation(input),
+  );
+
+  ipcMain.handle('safetwin:create-single-copy-operation', (_event, input: CreateSingleCopyOperationInput) =>
+    operations.createSingleCopyOperation(input),
   );
 
   ipcMain.handle('safetwin:create-cleanup-preview', (_event, input: CleanupPreviewInput) =>

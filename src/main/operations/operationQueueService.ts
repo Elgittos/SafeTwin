@@ -5,6 +5,7 @@ import type {
   CleanupPreviewInput,
   CreateCleanupOperationInput,
   CreateCopyOperationInput,
+  CreateSingleCopyOperationInput,
   FileCompareItem,
   OperationQueueItem,
   OperationSnapshot,
@@ -30,6 +31,20 @@ export interface OperationQueueDependencies {
 }
 
 const normalizeRelativePath = (relativePath: string): string => relativePath.replaceAll('\\', '/').toLowerCase();
+
+const toSafeRelativePath = (relativePath: string): string => relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
+
+const resolveInsideRoot = (rootPath: string, relativePath: string): string => {
+  const resolvedRoot = path.resolve(rootPath);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  const relativeFromRoot = path.relative(resolvedRoot, resolvedPath);
+
+  if (relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+    throw new Error('Selected file is outside the configured folder pair.');
+  }
+
+  return resolvedPath;
+};
 
 const isInsideSelectedFolder = (file: FileCompareItem, selectedFolderPaths: string[]): boolean => {
   const displayPath = file.displayPath.replaceAll('\\', '/');
@@ -121,6 +136,39 @@ export class OperationQueueService {
 
       this.repository.createOperationItem(operation.id, item);
     }
+
+    return this.repository.getSnapshot(operation.id);
+  }
+
+  async createSingleCopyOperation(input: CreateSingleCopyOperationInput): Promise<OperationSnapshot> {
+    const pair = this.folderPairs.getFolderPair(input.folderPairId);
+    const relativePath = toSafeRelativePath(input.relativePath);
+
+    if (!relativePath) {
+      throw new Error('Choose a file before copying.');
+    }
+
+    const sourcePath = resolveInsideRoot(pair.originPath, relativePath);
+    const backupPath = resolveInsideRoot(pair.backupPath, relativePath);
+    const sourceStats = await fsp.stat(sourcePath);
+
+    if (!sourceStats.isFile()) {
+      throw new Error('Selected origin item is not a file.');
+    }
+
+    const destinationPath =
+      input.action === 'copyMissing' ? backupPath : await createAvailableConflictDuplicatePath(backupPath);
+    const operation = this.repository.createOperation(pair.id, 'copy');
+
+    this.repository.createOperationItem(operation.id, {
+      action: input.action,
+      relativePath,
+      sourcePath,
+      destinationPath,
+      tempPath: getTempCopyPath(destinationPath),
+      bytesTotal: sourceStats.size,
+      verificationLevel: input.verificationLevel ?? 'auto',
+    });
 
     return this.repository.getSnapshot(operation.id);
   }

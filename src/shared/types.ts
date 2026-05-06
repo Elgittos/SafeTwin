@@ -198,6 +198,13 @@ export interface CreateCopyOperationInput {
   verificationLevel?: VerificationLevel;
 }
 
+export interface CreateSingleCopyOperationInput {
+  folderPairId: number;
+  relativePath: string;
+  action: 'copyMissing' | 'copyConflictDuplicate';
+  verificationLevel?: VerificationLevel;
+}
+
 export interface CleanupPreviewInput {
   folderPairId: number;
   selectedRelativePaths: string[];
@@ -260,6 +267,7 @@ export interface SafeTwinApi {
   getIgnoredFiles: (pairId: number) => Promise<IgnoredFile[]>;
   getLastStatus: (pairId: number) => Promise<LastStatus>;
   createCopyOperation: (input: CreateCopyOperationInput) => Promise<OperationSnapshot>;
+  createSingleCopyOperation: (input: CreateSingleCopyOperationInput) => Promise<OperationSnapshot>;
   createCleanupPreview: (input: CleanupPreviewInput) => Promise<CleanupPreview>;
   createCleanupOperation: (input: CreateCleanupOperationInput) => Promise<OperationSnapshot>;
   listOperations: (folderPairId?: number) => Promise<OperationSnapshot[]>;

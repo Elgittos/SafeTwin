@@ -181,6 +181,39 @@ describe('OperationQueueService', () => {
     }
   });
 
+  it('copies one visible missing file without requiring a scan cache', async () => {
+    const { root, db, folderPairs, operations } = await setupServices();
+    const originPath = path.join(root, 'origin');
+    const backupPath = path.join(root, 'backup');
+    const mtime = new Date('2026-05-06T12:00:00.000Z');
+
+    try {
+      await fs.mkdir(backupPath, { recursive: true });
+      await writeFile(path.join(originPath, 'single.txt'), 'single visible file', mtime);
+      const pair = folderPairs.saveFolderPair({
+        name: 'Origin to Backup',
+        originPath,
+        backupPath,
+      });
+      const copyOperation = await operations.createSingleCopyOperation({
+        folderPairId: pair.id,
+        relativePath: 'single.txt',
+        action: 'copyMissing',
+        verificationLevel: 'basic',
+      });
+
+      await operations.startOperation(copyOperation.operation.id);
+      const completed = await waitForTerminalOperation(operations, copyOperation.operation.id);
+
+      expect(completed.operation.state).toBe('completed');
+      expect(completed.items).toHaveLength(1);
+      expect(completed.items[0].action).toBe('copyMissing');
+      await expect(fs.readFile(path.join(backupPath, 'single.txt'), 'utf8')).resolves.toBe('single visible file');
+    } finally {
+      db.close();
+    }
+  });
+
   it('creates copy operations from the root folder selection', async () => {
     const { root, db, folderPairs, scanner, operations } = await setupServices();
 

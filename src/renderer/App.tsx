@@ -53,6 +53,7 @@ import type {
 type PaneSide = 'origin' | 'backup';
 type ThemeMode = 'light' | 'dark';
 type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
+type CopyAction = 'copyMissing' | 'copyConflictDuplicate';
 
 const filterOptions: Array<[FilterKey, string]> = [
   ['missing', 'Missing from backup'],
@@ -762,6 +763,7 @@ const App = () => {
   const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [quickFolderSummaries, setQuickFolderSummaries] = useState<DirectoryDiffSummary[]>([]);
+  const [refreshToken, setRefreshToken] = useState(0);
   const [isLoadingMarkers, setIsLoadingMarkers] = useState(false);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
   const [operationHistory, setOperationHistory] = useState<OperationSnapshot[]>([]);
@@ -1054,7 +1056,7 @@ const App = () => {
     return () => {
       canceled = true;
     };
-  }, [leftPath, originPath]);
+  }, [leftPath, originPath, refreshToken]);
 
   useEffect(() => {
     let canceled = false;
@@ -1081,7 +1083,7 @@ const App = () => {
     return () => {
       canceled = true;
     };
-  }, [backupPath, rightPath]);
+  }, [backupPath, refreshToken, rightPath]);
 
   useEffect(() => {
     let canceled = false;
@@ -1120,7 +1122,7 @@ const App = () => {
     return () => {
       canceled = true;
     };
-  }, [activePairId, backupPath, leftPath, originPath, rightPath]);
+  }, [activePairId, backupPath, leftPath, originPath, refreshToken, rightPath]);
 
   useEffect(() => {
     if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
@@ -1141,6 +1143,7 @@ const App = () => {
             setCopyPreview(null);
             setCleanupPreview(null);
             setOperationHistory(await window.safetwin.listOperations(activePairId));
+            setRefreshToken((current) => current + 1);
           }
         })
         .catch((pollError: unknown) => {
@@ -1385,6 +1388,41 @@ const App = () => {
     }
   };
 
+  const createSingleCopyQueue = async (relativePath: string, action: CopyAction) => {
+    if (!activePairId) {
+      return;
+    }
+
+    setIsPreparingOperation(true);
+    setError(null);
+
+    try {
+      const nextOperation = await window.safetwin.createSingleCopyOperation({
+        folderPairId: activePairId,
+        relativePath,
+        action,
+        verificationLevel,
+      });
+      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
+      setOperation(startedOperation);
+      setOperationHistory((current) => [
+        startedOperation,
+        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
+      ]);
+      setCopyPreview({
+        filesSelected: 1,
+        conflictsSelected: action === 'copyConflictDuplicate' ? 1 : 0,
+        totalSize: nextOperation.totals.bytesTotal,
+      });
+      setCleanupMode(false);
+      setCleanupPreview(null);
+    } catch (operationError) {
+      setError(toFriendlyError(operationError, 'Could not copy this file.'));
+    } finally {
+      setIsPreparingOperation(false);
+    }
+  };
+
   const previewCleanup = async () => {
     if (!activePairId) {
       return;
@@ -1533,12 +1571,15 @@ const App = () => {
           const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
           const eligible = rowIsSelectable(row);
           const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
-          const copyPath =
+          const copyAction: CopyAction | null =
             !cleanupMode && row.kind === 'file' && side === 'origin' && canCopy(row.file)
-              ? row.file.relativePath
+              ? row.file.state === 'conflictSamePathDifferentContent'
+                ? 'copyConflictDuplicate'
+                : 'copyMissing'
               : !cleanupMode && row.kind === 'missingPlaceholder' && side === 'backup'
-                ? row.relativePath
+                ? 'copyMissing'
                 : null;
+          const copyPath = copyAction ? row.relativePath : null;
           const rowClasses = ['explorer-row'];
 
           if (selected || folderSelected) {
@@ -1621,14 +1662,14 @@ const App = () => {
               </span>
               <span className="row-name">{row.name}</span>
               <span className="row-action">
-                {copyPath ? (
+                {copyPath && copyAction ? (
                   <button
                     type="button"
                     title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Backup' : 'Copy this Origin file to Backup'}
                     disabled={isPreparingOperation}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void createCopyQueue([copyPath]);
+                      void createSingleCopyQueue(copyPath, copyAction);
                     }}
                   >
                     <Copy size={13} aria-hidden="true" />

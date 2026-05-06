@@ -3,6 +3,7 @@ import type {
   CleanupPreviewInput,
   CreateCleanupOperationInput,
   CreateCopyOperationInput,
+  CreateSingleCopyOperationInput,
   SafeTwinApi,
   SaveFolderPairInput,
   ScanMode,
@@ -26,6 +27,8 @@ const api: SafeTwinApi = {
   getIgnoredFiles: (pairId: number) => ipcRenderer.invoke('safetwin:get-ignored-files', pairId),
   getLastStatus: (pairId: number) => ipcRenderer.invoke('safetwin:get-last-status', pairId),
   createCopyOperation: (input: CreateCopyOperationInput) => ipcRenderer.invoke('safetwin:create-copy-operation', input),
+  createSingleCopyOperation: (input: CreateSingleCopyOperationInput) =>
+    ipcRenderer.invoke('safetwin:create-single-copy-operation', input),
   createCleanupPreview: (input: CleanupPreviewInput) => ipcRenderer.invoke('safetwin:create-cleanup-preview', input),
   createCleanupOperation: (input: CreateCleanupOperationInput) =>
     ipcRenderer.invoke('safetwin:create-cleanup-operation', input),
