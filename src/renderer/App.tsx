@@ -1625,36 +1625,6 @@ const App = () => {
           </div>
 
           <section className="side-section">
-            <h2>Folder pair</h2>
-            <select
-              aria-label="Folder pair"
-              value={activePairId ?? ''}
-              onChange={(event) => {
-                const pair = pairs.find((item) => item.id === Number(event.target.value));
-
-                if (pair) {
-                  loadPairState(pair).catch((loadError: unknown) => {
-                    setError(toFriendlyError(loadError, 'Could not load folder pair.'));
-                  });
-                }
-              }}
-            >
-              <option value="">New folder pair</option>
-              {pairs.map((pair) => (
-                <option key={pair.id} value={pair.id}>
-                  {pair.name}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Pair name"
-              value={pairName}
-              onChange={(event) => setPairName(event.target.value)}
-              placeholder="Origin to Backup"
-            />
-          </section>
-
-          <section className="side-section">
             <h2>Actions</h2>
             <button type="button" onClick={() => scan()} disabled={isScanning}>
               {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
