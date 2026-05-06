@@ -661,7 +661,7 @@ select {
 
 .explorer-row {
   display: grid;
-  grid-template-columns: 22px 22px minmax(120px, 1fr) minmax(74px, auto) 72px;
+  grid-template-columns: 22px 22px minmax(90px, 1fr) 28px minmax(44px, auto) 72px;
   align-items: center;
   gap: 6px;
   width: 100%;
@@ -706,10 +706,38 @@ select {
 
 .row-select,
 .row-icon,
+.row-action,
 .row-status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.row-action button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #176046;
+  background: transparent;
+}
+
+.row-action button:hover {
+  border-color: #9ed9ba;
+  background: #dff7eb;
+}
+
+.theme-dark .row-action button {
+  color: #b7f3ce;
+}
+
+.theme-dark .row-action button:hover {
+  border-color: #315d48;
+  background: #193524;
 }
 
 .row-icon {

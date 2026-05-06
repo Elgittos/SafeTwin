@@ -1533,6 +1533,12 @@ const App = () => {
           const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
           const eligible = rowIsSelectable(row);
           const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
+          const copyPath =
+            !cleanupMode && row.kind === 'file' && side === 'origin' && canCopy(row.file)
+              ? row.file.relativePath
+              : !cleanupMode && row.kind === 'missingPlaceholder' && side === 'backup'
+                ? row.relativePath
+                : null;
           const rowClasses = ['explorer-row'];
 
           if (selected || folderSelected) {
@@ -1614,6 +1620,21 @@ const App = () => {
                 )}
               </span>
               <span className="row-name">{row.name}</span>
+              <span className="row-action">
+                {copyPath ? (
+                  <button
+                    type="button"
+                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy as duplicate to backup' : 'Copy this file to backup'}
+                    disabled={isPreparingOperation}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void createCopyQueue([copyPath]);
+                    }}
+                  >
+                    <Copy size={14} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </span>
               <span className="row-status">{indicatorFor(row, side)}</span>
               <span className="row-size">
                 {row.kind === 'file'
