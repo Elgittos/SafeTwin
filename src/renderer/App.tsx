@@ -940,10 +940,27 @@ const App = () => {
   }, [leftPath, scanResult]);
   const statusSummary = liveStatusSummary ?? emptySummary();
 
+  const loadCachedPairResult = async (pairId: number) => {
+    const [status, operations, ignored] = await Promise.all([
+      window.safetwin.getLastStatus(pairId),
+      window.safetwin.listOperations(pairId),
+      window.safetwin.getIgnoredFiles(pairId),
+    ]);
+
+    setPairs([status.folderPair]);
+    setScanResult(status.lastScan);
+    setOperationHistory(operations);
+    setOperation(
+      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
+    );
+    setIgnoredFiles(ignored);
+  };
+
   const savePairWithPaths = async (
     nextOriginPath: string,
     nextBackupPath: string,
     nextPairName: string,
+    loadCachedResult = true,
   ): Promise<FolderPair> => {
     if (!nextOriginPath || !nextBackupPath) {
       throw new Error('Choose both an origin folder and a recipient folder.');
@@ -965,6 +982,10 @@ const App = () => {
     setOriginPath(savedPair.originPath);
     setBackupPath(savedPair.backupPath);
     setPairName(savedPair.name);
+
+    if (loadCachedResult) {
+      await loadCachedPairResult(savedPair.id);
+    }
 
     return savedPair;
   };
@@ -1025,10 +1046,7 @@ const App = () => {
     setCleanupPreview(null);
     setError(null);
 
-    setScanResult(null);
-    setOperationHistory([]);
-    setOperation(null);
-    setIgnoredFiles([]);
+    await loadCachedPairResult(rememberedPair.id);
   };
 
   useEffect(() => {
@@ -1193,13 +1211,18 @@ const App = () => {
     }
   };
 
-  const savePair = async (): Promise<FolderPair> => {
-    return savePairWithPaths(originPath, backupPath, pairName || getDefaultPairName(originPath, backupPath));
+  const savePair = async (loadCachedResult = true): Promise<FolderPair> => {
+    return savePairWithPaths(
+      originPath,
+      backupPath,
+      pairName || getDefaultPairName(originPath, backupPath),
+      loadCachedResult,
+    );
   };
 
   const scan = async (mode: ScanMode = 'metadata') => {
     try {
-      const savedPair = await savePair();
+      const savedPair = await savePair(false);
       await scanSavedPair(savedPair, mode);
     } catch (scanError) {
       setError(toFriendlyError(scanError, 'Scan failed.'));
@@ -1384,7 +1407,7 @@ const App = () => {
     }
 
     try {
-      const savedPair = await savePair();
+      const savedPair = await savePair(false);
       let currentScan = scanResult;
 
       if (!currentScan) {
