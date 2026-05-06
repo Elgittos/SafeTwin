@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Cloud,
   Code2,
-  Copy,
   File,
   FileImage,
   FileText,
@@ -314,7 +313,7 @@ const createLiveCompareItem = (
 
 const stateLabel = (file: FileCompareItem): string => {
   if (file.state === 'missingInBackup') {
-    return 'missing in recipient ready to copy';
+    return 'missing in recipient ready to back up';
   }
 
   if (file.state === 'backupOnly') {
@@ -684,7 +683,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
 
   if (row.operationItem?.state === 'running') {
     return (
-      <span className="indicator indicator-running" title="Copying...">
+      <span className="indicator indicator-running" title="Backing up...">
         <Loader2 className="spin" size={15} aria-hidden="true" />
       </span>
     );
@@ -877,7 +876,21 @@ const App = () => {
       (file) => selected.has(file.relativePath) || isInsideSelectedFolderPath(file, selectedFolderPaths),
     );
   }, [leftRows, rightRows, scanResult, selectedFolderPaths, selectedPaths]);
-  const copySelectedFiles = useMemo(() => selectedFiles.filter(canCopy), [selectedFiles]);
+  const missingSelectedFiles = useMemo(
+    () => selectedFiles.filter((file) => file.state === 'missingInBackup'),
+    [selectedFiles],
+  );
+  const missingSelectedPaths = useMemo(() => {
+    const paths = new Set(missingSelectedFiles.map((file) => file.relativePath));
+
+    for (const file of scanResult?.files ?? []) {
+      if (file.state === 'missingInBackup' && isInsideSelectedFolderPath(file, selectedFolderPaths)) {
+        paths.add(file.relativePath);
+      }
+    }
+
+    return [...paths];
+  }, [missingSelectedFiles, scanResult, selectedFolderPaths]);
   const cleanupSelectedFiles = useMemo(() => selectedFiles.filter(canCleanup), [selectedFiles]);
   const conflictSelectedFiles = useMemo(
     () => selectedFiles.filter((file) => file.state === 'conflictSamePathDifferentContent'),
@@ -1384,7 +1397,7 @@ const App = () => {
       setCleanupMode(false);
       setCleanupPreview(null);
     } catch (operationError) {
-      setError(toFriendlyError(operationError, 'Could not create copy queue.'));
+      setError(toFriendlyError(operationError, 'Could not create backup queue.'));
     } finally {
       setIsPreparingOperation(false);
     }
@@ -1402,44 +1415,6 @@ const App = () => {
 
     await startCopyOperation(activePairId, paths, folderPaths);
   };
-
-  const copyMissingHere = () => {
-    void createCopyQueue([], [leftPath]);
-  };
-
-  const backupMissingNow = async () => {
-    if (!originPath || !backupPath) {
-      setError('Choose an Origin folder and a Recipient folder first.');
-      return;
-    }
-
-    try {
-      const savedPair = await savePair(false);
-      let currentScan = scanResult;
-
-      if (!currentScan) {
-        const status = await window.safetwin.getLastStatus(savedPair.id);
-        currentScan = status.lastScan;
-        setPairs([status.folderPair]);
-        setScanResult(status.lastScan);
-      }
-
-      if (!currentScan) {
-        setError('Run Scan only once first. After that SafeTwin reuses the cached missing-files list.');
-        return;
-      }
-
-      if (currentScan.summary.missingInBackup === 0) {
-        setError('No missing files to copy from the last scan.');
-        return;
-      }
-
-      await startCopyOperation(savedPair.id, [], ['']);
-    } catch (backupError) {
-      setError(toFriendlyError(backupError, 'Could not back up missing files.'));
-    }
-  };
-
 
   const createSingleCopyQueue = async (relativePath: string, action: CopyAction) => {
     if (!activePairId) {
@@ -1470,7 +1445,7 @@ const App = () => {
       setCleanupMode(false);
       setCleanupPreview(null);
     } catch (operationError) {
-      setError(toFriendlyError(operationError, 'Could not copy this file.'));
+      setError(toFriendlyError(operationError, 'Could not back up this file.'));
     } finally {
       setIsPreparingOperation(false);
     }
@@ -1623,9 +1598,7 @@ const App = () => {
               ? row.file.state === 'conflictSamePathDifferentContent'
                 ? 'copyConflictDuplicate'
                 : 'copyMissing'
-              : !cleanupMode && row.kind === 'missingPlaceholder' && side === 'backup'
-                ? 'copyMissing'
-                : null;
+              : null;
           const copyPath = copyAction ? row.relativePath : null;
           const activeCopyItem = copyPath ? operationByPath.get(normalizePath(copyPath).toLowerCase()) ?? null : null;
           const copyDisabledByOperation = activeCopyItem
@@ -1633,10 +1606,8 @@ const App = () => {
             : false;
           const copyButtonLabel =
             copyAction === 'copyConflictDuplicate'
-              ? 'Copy duplicate'
-              : side === 'backup'
-                ? 'Copy here'
-                : 'Copy to recipient';
+              ? 'Save duplicate'
+              : 'Back up file';
           const rowClasses = ['explorer-row'];
 
           if (selected || folderSelected) {
@@ -1722,18 +1693,22 @@ const App = () => {
                 {copyPath && copyAction ? (
                   <button
                     type="button"
-                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Recipient' : 'Copy this Origin file to Recipient'}
+                    title={
+                      row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent'
+                        ? 'Save this Origin conflict as a renamed duplicate in Recipient'
+                        : 'Back up this missing Origin file to Recipient'
+                    }
                     disabled={isPreparingOperation || copyDisabledByOperation}
                     onClick={(event) => {
                       event.stopPropagation();
                       void createSingleCopyQueue(copyPath, copyAction);
                     }}
                   >
-                    <Copy size={13} aria-hidden="true" />
+                    <HardDrive size={13} aria-hidden="true" />
                     {activeCopyItem?.state === 'completed'
-                      ? 'Copied'
+                      ? 'Backed up'
                       : activeCopyItem && ['pending', 'running', 'paused'].includes(activeCopyItem.state)
-                        ? 'Copying'
+                        ? 'Backing up'
                         : copyButtonLabel}
                   </button>
                 ) : null}
@@ -1768,10 +1743,6 @@ const App = () => {
 
           <section className="side-section">
             <h2>Actions</h2>
-            <button type="button" onClick={backupMissingNow} disabled={!originPath || !backupPath || isScanning || isPreparingOperation}>
-              {isPreparingOperation ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-              Copy missing now
-            </button>
             <button type="button" onClick={() => scan()} disabled={isScanning}>
               {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
               Scan only
@@ -1784,14 +1755,6 @@ const App = () => {
             ) : null}
             {showAdvancedControls ? (
               <>
-                <button
-                  type="button"
-                  onClick={copyMissingHere}
-                  disabled={!scanResult || statusSummary.missingInBackup === 0 || isPreparingOperation}
-                >
-                  <Copy size={16} aria-hidden="true" />
-                  Copy all missing here
-                </button>
                 <button
                   className={selectionMode ? 'toolbar-active' : ''}
                   type="button"
@@ -1876,19 +1839,19 @@ const App = () => {
 
           {showAdvancedControls ? (
           <section className="side-section">
-            <h2>Selection</h2>
+            <h2>Update Recipient</h2>
             <span className="selection-summary">
               {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
             </span>
             <button
               type="button"
-              disabled={cleanupMode || (copySelectedFiles.length === 0 && selectedFolderPaths.length === 0)}
-              onClick={() => createCopyQueue(copySelectedFiles.map((file) => file.relativePath), selectedFolderPaths)}
+              disabled={cleanupMode || missingSelectedPaths.length === 0}
+              onClick={() => createCopyQueue(missingSelectedPaths)}
             >
-              Copy selected
+              Back up selected missing files
             </button>
             <button type="button" onClick={selectVisibleEligible}>
-              Select visible
+              {cleanupMode ? 'Select visible cleanup items' : 'Select visible missing/conflicts'}
             </button>
             <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
               Clear
@@ -1918,7 +1881,7 @@ const App = () => {
                   Swap roles
                 </option>
                 <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
-                  Copy selected conflicts
+                  Save selected conflicts as duplicates
                 </option>
               </select>
             ) : null}
@@ -1942,7 +1905,7 @@ const App = () => {
         <section className="main-workspace">
           <section className="status-strip">
         <span>Last scan: {formatDate(activePair?.lastScanAt ?? null)}</span>
-        <span>Last copy: {formatDate(lastCopyAt)}</span>
+        <span>Last backup: {formatDate(lastCopyAt)}</span>
         <span>
           Missing in recipient: {statusSummary.missingInBackup} files / {formatBytes(statusSummary.totalMissingSize)}
         </span>
@@ -1986,11 +1949,11 @@ const App = () => {
 
       {copyPreview ? (
         <section className="operation-preview">
-          <strong>Copy preview</strong>
+          <strong>Backup preview</strong>
           <span>Files selected: {copyPreview.filesSelected}</span>
           {showAdvancedControls ? <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span> : null}
           <span>Total size: {formatBytes(copyPreview.totalSize)}</span>
-          <span>Action: copy Origin to Recipient; existing Recipient files stay preserved</span>
+          <span>Action: back up selected missing Origin files to Recipient; existing Recipient files stay preserved</span>
         </section>
       ) : null}
 
@@ -2079,7 +2042,7 @@ const App = () => {
       {operation ? (
         <section className="operation-drawer">
           <div className="drawer-title">
-            <strong>{operation.operation.type === 'copy' ? 'Copy queue' : 'Cleanup queue'}</strong>
+            <strong>{operation.operation.type === 'copy' ? 'Backup queue' : 'Cleanup queue'}</strong>
             <span>{operation.operation.state}</span>
           </div>
           <div className="drawer-actions">
