@@ -214,21 +214,6 @@ const parentPath = (relativePath: string): string => {
   return slashIndex === -1 ? '' : normalized.slice(0, slashIndex);
 };
 
-const breadcrumbParts = (relativePath: string): Array<{ name: string; relativePath: string }> => {
-  const normalized = normalizePath(relativePath);
-
-  if (!normalized) {
-    return [];
-  }
-
-  const parts = normalized.split('/').filter(Boolean);
-
-  return parts.map((name, index) => ({
-    name,
-    relativePath: parts.slice(0, index + 1).join('/'),
-  }));
-};
-
 const basename = (relativePath: string): string => {
   const normalized = normalizePath(relativePath);
   return normalized.split('/').filter(Boolean).at(-1) ?? 'Root';
@@ -981,19 +966,6 @@ const App = () => {
     setBackupPath(savedPair.backupPath);
     setPairName(savedPair.name);
 
-    const [status, operations, ignored] = await Promise.all([
-      window.safetwin.getLastStatus(savedPair.id),
-      window.safetwin.listOperations(savedPair.id),
-      window.safetwin.getIgnoredFiles(savedPair.id),
-    ]);
-    setPairs([status.folderPair]);
-    setScanResult(status.lastScan);
-    setOperationHistory(operations);
-    setOperation(
-      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
-    );
-    setIgnoredFiles(ignored);
-
     return savedPair;
   };
 
@@ -1053,19 +1025,10 @@ const App = () => {
     setCleanupPreview(null);
     setError(null);
 
-    const [status, operations, ignored] = await Promise.all([
-      window.safetwin.getLastStatus(rememberedPair.id),
-      window.safetwin.listOperations(rememberedPair.id),
-      window.safetwin.getIgnoredFiles(rememberedPair.id),
-    ]);
-
-    setPairs([status.folderPair]);
-    setScanResult(status.lastScan);
-    setOperationHistory(operations);
-    setOperation(
-      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
-    );
-    setIgnoredFiles(ignored);
+    setScanResult(null);
+    setOperationHistory([]);
+    setOperation(null);
+    setIgnoredFiles([]);
   };
 
   useEffect(() => {
@@ -1622,19 +1585,9 @@ const App = () => {
         <button type="button" title="Back" onClick={() => navigatePane(side, parentPath(pathValue))}>
           <ChevronLeft size={15} aria-hidden="true" />
         </button>
-        <button type="button" className="breadcrumb-link" onClick={() => navigatePane(side, '')}>
-          Root
+        <button type="button" className="breadcrumb-path" title="Go to root" onClick={() => navigatePane(side, '')}>
+          {pathValue ? `Root / ${pathValue}` : 'Root'}
         </button>
-        {breadcrumbParts(pathValue).map((part) => (
-          <button
-            type="button"
-            className="breadcrumb-link"
-            key={`${side}-crumb-${part.relativePath}`}
-            onClick={() => navigatePane(side, part.relativePath)}
-          >
-            {part.name}
-          </button>
-        ))}
       </div>
 
       <div className="pane-list">

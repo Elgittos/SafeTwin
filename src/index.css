@@ -652,9 +652,9 @@ select {
   padding: 0;
 }
 
-.breadcrumb .breadcrumb-link {
-  width: auto;
-  max-width: 180px;
+.breadcrumb .breadcrumb-path {
+  justify-content: flex-start;
+  width: 100%;
   min-width: 0;
   padding: 0 8px;
   overflow: hidden;
