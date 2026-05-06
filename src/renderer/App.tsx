@@ -55,7 +55,7 @@ type ThemeMode = 'light' | 'dark';
 type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
 
 const filterOptions: Array<[FilterKey, string]> = [
-  ['missing', 'Ready to copy'],
+  ['missing', 'Missing from backup'],
   ['conflicts', 'Conflicts'],
   ['backupOnly', 'Backup-only'],
   ['ignored', 'Ignored'],
@@ -697,7 +697,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
 
   if (row.file.state === 'missingInBackup') {
     return (
-      <span className="indicator indicator-plus" title="Ready to copy">
+      <span className="indicator indicator-plus" title="Missing from backup">
         <Plus size={15} aria-hidden="true" />
       </span>
     );
@@ -1506,9 +1506,9 @@ const App = () => {
         <div>
           <strong>
             {filter === 'missing' && side === 'origin'
-              ? 'READY TO COPY'
+              ? 'MISSING FROM BACKUP'
               : filter === 'missing' && side === 'backup'
-                ? 'BACKUP LOCATION'
+                ? 'BACKUP TARGET'
                 : side === 'origin'
                   ? 'ORIGIN'
                   : 'BACKUP'}
@@ -1624,14 +1624,15 @@ const App = () => {
                 {copyPath ? (
                   <button
                     type="button"
-                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy as duplicate to backup' : 'Copy this file to backup'}
+                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Backup' : 'Copy this Origin file to Backup'}
                     disabled={isPreparingOperation}
                     onClick={(event) => {
                       event.stopPropagation();
                       void createCopyQueue([copyPath]);
                     }}
                   >
-                    <Copy size={14} aria-hidden="true" />
+                    <Copy size={13} aria-hidden="true" />
+                    Copy
                   </button>
                 ) : null}
               </span>
@@ -1679,7 +1680,7 @@ const App = () => {
               disabled={statusSummary.missingInBackup === 0 || isPreparingOperation}
             >
               <Copy size={16} aria-hidden="true" />
-              Copy Ready
+              Copy missing here
             </button>
             <button
               className={selectionMode ? 'toolbar-active' : ''}
