@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
-  Check,
+  ArrowRight,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
@@ -22,7 +22,6 @@ import {
   Moon,
   Pause,
   Play,
-  Plus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -530,7 +529,8 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
       <div className="badges">
         {row.counts.missingInBackup > 0 && side === 'origin' ? (
           <span className="badge badge-plus" title="Ready to copy">
-            +{row.counts.missingInBackup}
+            <ArrowRight size={12} aria-hidden="true" />
+            {row.counts.missingInBackup}
           </span>
         ) : null}
         {row.counts.backupOnly > 0 && side === 'backup' ? (
@@ -559,8 +559,8 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
           skippedCount(row.counts) +
           row.failedCount ===
         0 ? (
-          <span className="badge badge-ok" title="Matched">
-            OK
+          <span className="badge badge-plus" title="Present on both sides">
+            <ArrowRight size={12} aria-hidden="true" />
           </span>
         ) : null}
       </div>
@@ -586,7 +586,15 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
   if (row.file.state === 'missingInBackup') {
     return (
       <span className="indicator indicator-plus" title="Ready to copy">
-        <Plus size={15} aria-hidden="true" />
+        <ArrowRight size={15} aria-hidden="true" />
+      </span>
+    );
+  }
+
+  if (row.file.state === 'identical') {
+    return (
+      <span className="indicator indicator-plus" title="Present on both sides">
+        <ArrowRight size={15} aria-hidden="true" />
       </span>
     );
   }
@@ -595,14 +603,6 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
     return (
       <span className="indicator indicator-minus" title="Backup-only cleanup candidate">
         <Minus size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'identical') {
-    return (
-      <span className="indicator indicator-ok" title="Matched">
-        <Check size={15} aria-hidden="true" />
       </span>
     );
   }
@@ -815,6 +815,14 @@ const App = () => {
 
     return null;
   }, [activePair]);
+  const liveStatusSummary = useMemo(() => {
+    const currentKey = normalizePath(leftPath).toLowerCase();
+    return (
+      quickFolderSummaries.find((folder) => normalizePath(folder.relativePath).toLowerCase() === currentKey)
+        ?.counts ?? null
+    );
+  }, [leftPath, quickFolderSummaries]);
+  const statusSummary = liveStatusSummary ?? scanResult?.summary ?? emptySummary();
 
   const savePairWithPaths = async (
     nextOriginPath: string,
@@ -1618,16 +1626,14 @@ const App = () => {
         <span>Last copy: {formatDate(lastCopyAt)}</span>
         <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
         <span>
-          Missing in backup: {scanResult?.summary.missingInBackup ?? 0} files /{' '}
-          {formatBytes(scanResult?.summary.totalMissingSize ?? 0)}
+          Missing in backup: {statusSummary.missingInBackup} files / {formatBytes(statusSummary.totalMissingSize)}
         </span>
         <span>
-          Backup-only: {scanResult?.summary.backupOnly ?? 0} files /{' '}
-          {formatBytes(scanResult?.summary.totalBackupOnlySize ?? 0)}
+          Backup-only: {statusSummary.backupOnly} files / {formatBytes(statusSummary.totalBackupOnlySize)}
         </span>
-        <span>Conflicts: {scanResult?.summary.conflicts ?? 0}</span>
-        <span>Ignored: {scanResult?.summary.ignored ?? 0}</span>
-        <span>Skipped: {skippedCount(scanResult?.summary ?? emptySummary())}</span>
+        <span>Conflicts: {statusSummary.conflicts}</span>
+        <span>Ignored: {statusSummary.ignored}</span>
+        <span>Skipped: {skippedCount(statusSummary)}</span>
         {isLoadingMarkers ? (
           <span className="marker-loading">
             <Loader2 className="spin" size={12} aria-hidden="true" />

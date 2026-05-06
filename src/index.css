@@ -582,9 +582,7 @@ select {
 }
 
 .badge-plus,
-.indicator-plus,
-.badge-ok,
-.indicator-ok {
+.indicator-plus {
   color: #176046;
   background: #daf5e7;
 }

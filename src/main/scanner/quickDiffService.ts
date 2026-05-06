@@ -156,7 +156,7 @@ const walkSide = async (
   return { files, ignoredFiles, skippedFiles };
 };
 
-const immediateFolderFor = (filePath: string, currentPath: string): string | null => {
+const descendantFoldersFor = (filePath: string, currentPath: string): string[] => {
   const displayPath = normalizeRelativePath(filePath);
   const normalizedCurrent = normalizeRelativePath(currentPath);
   const remainder = normalizedCurrent
@@ -166,11 +166,15 @@ const immediateFolderFor = (filePath: string, currentPath: string): string | nul
     : displayPath;
 
   if (!remainder || !remainder.includes('/')) {
-    return null;
+    return [];
   }
 
-  const folderName = remainder.split('/')[0];
-  return normalizedCurrent ? `${normalizedCurrent}/${folderName}` : folderName;
+  const folderParts = remainder.split('/').slice(0, -1);
+
+  return folderParts.map((_, index) => {
+    const folderPath = folderParts.slice(0, index + 1).join('/');
+    return normalizedCurrent ? `${normalizedCurrent}/${folderPath}` : folderPath;
+  });
 };
 
 export const summarizeDirectoryDifferences = async (
@@ -190,17 +194,16 @@ export const summarizeDirectoryDifferences = async (
     skippedFiles: [...originWalk.skippedFiles, ...backupWalk.skippedFiles],
   });
   const summaries = new Map<string, ScanSummary>();
+  summaries.set(normalizedRelativePath, createEmptySummary());
 
   for (const file of comparison.files) {
-    const folderPath = immediateFolderFor(file.displayPath, normalizedRelativePath);
+    incrementSummary(summaries.get(normalizedRelativePath) ?? createEmptySummary(), file.state, file.sizeBytes);
 
-    if (!folderPath) {
-      continue;
+    for (const folderPath of descendantFoldersFor(file.displayPath, normalizedRelativePath)) {
+      const summary = summaries.get(folderPath) ?? createEmptySummary();
+      incrementSummary(summary, file.state, file.sizeBytes);
+      summaries.set(folderPath, summary);
     }
-
-    const summary = summaries.get(folderPath) ?? createEmptySummary();
-    incrementSummary(summary, file.state, file.sizeBytes);
-    summaries.set(folderPath, summary);
   }
 
   return [...summaries.entries()]
