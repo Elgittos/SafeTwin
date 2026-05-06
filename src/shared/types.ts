@@ -222,8 +222,17 @@ export interface ChooseFolderResult {
   path: string | null;
 }
 
+export interface DirectoryPreviewEntry {
+  name: string;
+  relativePath: string;
+  absolutePath: string;
+  kind: 'folder' | 'file';
+  sizeBytes: number;
+}
+
 export interface SafeTwinApi {
   chooseFolder: () => Promise<ChooseFolderResult>;
+  listDirectory: (rootPath: string, relativePath?: string) => Promise<DirectoryPreviewEntry[]>;
   listFolderPairs: () => Promise<FolderPair[]>;
   saveFolderPair: (input: SaveFolderPairInput) => Promise<FolderPair>;
   updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) => Promise<FolderPair>;

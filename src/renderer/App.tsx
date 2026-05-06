@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import type {
   CleanupPreview,
+  DirectoryPreviewEntry,
   FileCompareItem,
   FolderPair,
   IgnoreRuleSetting,
@@ -78,7 +79,25 @@ interface FileRow {
   operationItem: OperationQueueItem | null;
 }
 
-type PaneRow = ParentRow | FolderRow | FileRow;
+interface PreviewFolderRow {
+  kind: 'previewFolder';
+  side: PaneSide;
+  relativePath: string;
+  name: string;
+  displayPath: string;
+}
+
+interface PreviewFileRow {
+  kind: 'previewFile';
+  side: PaneSide;
+  relativePath: string;
+  name: string;
+  displayPath: string;
+  absolutePath: string;
+  sizeBytes: number;
+}
+
+type PaneRow = ParentRow | FolderRow | FileRow | PreviewFolderRow | PreviewFileRow;
 
 const emptySummary = (): ScanSummary => ({
   missingInBackup: 0,
@@ -238,6 +257,10 @@ const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>
     return true;
   }
 
+  if (row.kind === 'previewFolder' || row.kind === 'previewFile') {
+    return false;
+  }
+
   if (row.kind === 'folder') {
     if (filter === 'missing') {
       return row.counts.missingInBackup > 0;
@@ -295,6 +318,8 @@ const matchesSearch = (row: PaneRow, query: string): boolean => {
   const corpus =
     row.kind === 'file'
       ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} ${stateLabel(row.file)} ${row.file.reason}`
+      : row.kind === 'previewFile'
+        ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} file`
       : `${row.name} ${row.displayPath} missing backup-only conflict ignored skipped folder`;
 
   return corpus.toLowerCase().includes(trimmed);
@@ -304,16 +329,12 @@ const buildPaneRows = (
   side: PaneSide,
   currentPath: string,
   scanResult: ScanResult | null,
+  previewEntries: DirectoryPreviewEntry[],
   operationByPath: Map<string, OperationQueueItem>,
   failedPaths: Set<string>,
   filter: FilterKey,
   search: string,
 ): PaneRow[] => {
-  if (!scanResult) {
-    return [];
-  }
-
-  const folderCounts = new Map(scanResult.folders.map((folder) => [normalizePath(folder.relativePath), folder.counts]));
   const normalizedCurrent = normalizePath(currentPath);
   const rows: PaneRow[] = [];
 
@@ -326,6 +347,32 @@ const buildPaneRows = (
       displayPath: parentPath(normalizedCurrent) || 'Root',
     });
   }
+
+  if (!scanResult) {
+    const previewRows: PaneRow[] = previewEntries.map((entry) =>
+      entry.kind === 'folder'
+        ? {
+            kind: 'previewFolder',
+            side,
+            relativePath: normalizePath(entry.relativePath),
+            name: entry.name,
+            displayPath: normalizePath(entry.relativePath),
+          }
+        : {
+            kind: 'previewFile',
+            side,
+            relativePath: normalizePath(entry.relativePath),
+            name: entry.name,
+            displayPath: normalizePath(entry.relativePath),
+            absolutePath: entry.absolutePath,
+            sizeBytes: entry.sizeBytes,
+          },
+    );
+
+    return [...rows, ...previewRows].filter((row) => matchesFilter(row, filter, failedPaths) && matchesSearch(row, search));
+  }
+
+  const folderCounts = new Map(scanResult.folders.map((folder) => [normalizePath(folder.relativePath), folder.counts]));
 
   const childFolders = new Set<string>();
 
@@ -385,7 +432,7 @@ const canCopy = (file: FileCompareItem): boolean =>
 const canCleanup = (file: FileCompareItem): boolean => file.state === 'backupOnly';
 
 const indicatorFor = (row: PaneRow, side: PaneSide) => {
-  if (row.kind === 'parent') {
+  if (row.kind === 'parent' || row.kind === 'previewFolder' || row.kind === 'previewFile') {
     return null;
   }
 
@@ -511,6 +558,8 @@ const App = () => {
   const [leftPath, setLeftPath] = useState('');
   const [rightPath, setRightPath] = useState('');
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
+  const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
   const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
@@ -545,12 +594,12 @@ const App = () => {
     [operation],
   );
   const leftRows = useMemo(
-    () => buildPaneRows('origin', leftPath, scanResult, operationByPath, failedPaths, filter, search),
-    [failedPaths, filter, leftPath, operationByPath, scanResult, search],
+    () => buildPaneRows('origin', leftPath, scanResult, originPreviewEntries, operationByPath, failedPaths, filter, search),
+    [failedPaths, filter, leftPath, operationByPath, originPreviewEntries, scanResult, search],
   );
   const rightRows = useMemo(
-    () => buildPaneRows('backup', rightPath, scanResult, operationByPath, failedPaths, filter, search),
-    [failedPaths, filter, operationByPath, rightPath, scanResult, search],
+    () => buildPaneRows('backup', rightPath, scanResult, backupPreviewEntries, operationByPath, failedPaths, filter, search),
+    [backupPreviewEntries, failedPaths, filter, operationByPath, rightPath, scanResult, search],
   );
   const selectedFiles = useMemo(() => {
     const selected = new Set(selectedPaths);
@@ -584,7 +633,70 @@ const App = () => {
     return null;
   }, [activePair]);
 
-  const loadPairState = async (pair: FolderPair) => {
+  const savePairWithPaths = async (
+    nextOriginPath: string,
+    nextBackupPath: string,
+    nextPairName: string,
+  ): Promise<FolderPair> => {
+    if (!nextOriginPath || !nextBackupPath) {
+      throw new Error('Choose both an origin folder and a backup folder.');
+    }
+
+    const input: SaveFolderPairInput = {
+      id: activePairId ?? undefined,
+      name: nextPairName || getDefaultPairName(nextOriginPath, nextBackupPath),
+      originPath: nextOriginPath,
+      backupPath: nextBackupPath,
+      mirrorNavigationEnabled: activePair?.mirrorNavigationEnabled ?? true,
+      reminderIntervalDays: activePair?.reminderIntervalDays ?? null,
+    };
+    const savedPair = await window.safetwin.saveFolderPair(input);
+    const nextPairs = await window.safetwin.listFolderPairs();
+    setPairs(nextPairs);
+    setActivePairId(savedPair.id);
+    setOriginPath(savedPair.originPath);
+    setBackupPath(savedPair.backupPath);
+    setPairName(savedPair.name);
+
+    return savedPair;
+  };
+
+  const scanSavedPair = async (pair: FolderPair, mode: ScanMode = 'metadata') => {
+    setIsScanning(true);
+    setError(null);
+    setScanProgress({
+      folderPairId: pair.id,
+      scanRunId: null,
+      mode,
+      phase: 'starting',
+      side: 'both',
+      currentPath: '',
+      filesDiscovered: 0,
+      foldersDiscovered: 0,
+      ignored: 0,
+      skipped: 0,
+      message: 'Starting scan',
+    });
+
+    try {
+      const result = await window.safetwin.scanPair(pair.id, mode);
+      setScanResult(result);
+      setSelectedPaths([]);
+      setSelectedFolderPaths([]);
+      setCleanupPreview(null);
+      const nextPairs = await window.safetwin.listFolderPairs();
+      setPairs(nextPairs);
+      setActivePairId(pair.id);
+      setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : 'Scan failed.');
+    } finally {
+      setIsScanning(false);
+      window.setTimeout(() => setScanProgress(null), 1400);
+    }
+  };
+
+  const loadPairState = async (pair: FolderPair, scanIfMissing = false) => {
     setActivePairId(pair.id);
     setOriginPath(pair.originPath);
     setBackupPath(pair.backupPath);
@@ -601,6 +713,10 @@ const App = () => {
     const operations = await window.safetwin.listOperations(pair.id);
     setOperation(operations[0] ?? null);
     setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
+
+    if (!status.lastScan && scanIfMissing) {
+      await scanSavedPair(pair);
+    }
   };
 
   const loadPairs = async () => {
@@ -608,7 +724,7 @@ const App = () => {
     setPairs(nextPairs);
 
     if (!activePairId && nextPairs.length > 0) {
-      await loadPairState(nextPairs[0]);
+      await loadPairState(nextPairs[0], true);
     }
   };
 
@@ -623,6 +739,60 @@ const App = () => {
       setScanProgress(progress);
     });
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (!originPath) {
+      setOriginPreviewEntries([]);
+      return undefined;
+    }
+
+    window.safetwin
+      .listDirectory(originPath, leftPath)
+      .then((entries) => {
+        if (!canceled) {
+          setOriginPreviewEntries(entries);
+        }
+      })
+      .catch((previewError: unknown) => {
+        if (!canceled) {
+          setOriginPreviewEntries([]);
+          setError(previewError instanceof Error ? previewError.message : 'Could not read origin folder.');
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [leftPath, originPath]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (!backupPath) {
+      setBackupPreviewEntries([]);
+      return undefined;
+    }
+
+    window.safetwin
+      .listDirectory(backupPath, rightPath)
+      .then((entries) => {
+        if (!canceled) {
+          setBackupPreviewEntries(entries);
+        }
+      })
+      .catch((previewError: unknown) => {
+        if (!canceled) {
+          setBackupPreviewEntries([]);
+          setError(previewError instanceof Error ? previewError.message : 'Could not read backup folder.');
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [backupPath, rightPath]);
 
   useEffect(() => {
     if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
@@ -660,73 +830,42 @@ const App = () => {
       return;
     }
 
-    if (side === 'origin') {
-      setOriginPath(result.path);
-      if (!pairName && backupPath) {
-        setPairName(getDefaultPairName(result.path, backupPath));
-      }
-    } else {
-      setBackupPath(result.path);
-      if (!pairName && originPath) {
-        setPairName(getDefaultPairName(originPath, result.path));
+    const nextOriginPath = side === 'origin' ? result.path : originPath;
+    const nextBackupPath = side === 'backup' ? result.path : backupPath;
+    const nextPairName =
+      pairName || (nextOriginPath && nextBackupPath ? getDefaultPairName(nextOriginPath, nextBackupPath) : '');
+
+    setOriginPath(nextOriginPath);
+    setBackupPath(nextBackupPath);
+    setPairName(nextPairName);
+    setLeftPath('');
+    setRightPath('');
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCleanupPreview(null);
+    setScanResult(null);
+    setError(null);
+
+    if (nextOriginPath && nextBackupPath) {
+      try {
+        const savedPair = await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
+        await scanSavedPair(savedPair);
+      } catch (folderError) {
+        setError(folderError instanceof Error ? folderError.message : 'Could not scan selected folders.');
       }
     }
   };
 
   const savePair = async (): Promise<FolderPair> => {
-    if (!originPath || !backupPath) {
-      throw new Error('Choose both an origin folder and a backup folder.');
-    }
-
-    const input: SaveFolderPairInput = {
-      id: activePairId ?? undefined,
-      name: pairName || getDefaultPairName(originPath, backupPath),
-      originPath,
-      backupPath,
-      mirrorNavigationEnabled: activePair?.mirrorNavigationEnabled ?? true,
-      reminderIntervalDays: activePair?.reminderIntervalDays ?? null,
-    };
-    const savedPair = await window.safetwin.saveFolderPair(input);
-    const nextPairs = await window.safetwin.listFolderPairs();
-    setPairs(nextPairs);
-    setActivePairId(savedPair.id);
-    setPairName(savedPair.name);
-
-    return savedPair;
+    return savePairWithPaths(originPath, backupPath, pairName);
   };
 
   const scan = async (mode: ScanMode = 'metadata') => {
-    setIsScanning(true);
-    setError(null);
-    setScanProgress({
-      folderPairId: activePairId ?? 0,
-      scanRunId: null,
-      mode,
-      phase: 'starting',
-      side: 'both',
-      currentPath: '',
-      filesDiscovered: 0,
-      foldersDiscovered: 0,
-      ignored: 0,
-      skipped: 0,
-      message: 'Starting scan',
-    });
-
     try {
       const savedPair = await savePair();
-      const result = await window.safetwin.scanPair(savedPair.id, mode);
-      setScanResult(result);
-      setSelectedPaths([]);
-      setSelectedFolderPaths([]);
-      setCleanupPreview(null);
-      const nextPairs = await window.safetwin.listFolderPairs();
-      setPairs(nextPairs);
-      setIgnoredFiles(await window.safetwin.getIgnoredFiles(savedPair.id));
+      await scanSavedPair(savedPair, mode);
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : 'Scan failed.');
-    } finally {
-      setIsScanning(false);
-      window.setTimeout(() => setScanProgress(null), 1400);
     }
   };
 
@@ -892,6 +1031,7 @@ const App = () => {
         {rows.map((row) => {
           const selected = row.kind === 'file' && selectedPaths.includes(row.relativePath);
           const eligible = row.kind === 'file' && (cleanupMode ? canCleanup(row.file) : canCopy(row.file));
+          const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
 
           return (
             <button
@@ -899,15 +1039,15 @@ const App = () => {
               key={`${side}-${row.kind}-${row.relativePath}`}
               type="button"
               onClick={() => {
-                if (row.kind === 'folder' || row.kind === 'parent') {
+                if (isFolderRow) {
                   navigatePane(side, row.relativePath);
-                } else if (selectionMode) {
+                } else if (row.kind === 'file' && selectionMode) {
                   toggleSelectedPath(row.file);
                 }
               }}
               onDoubleClick={() => {
-                if (row.kind === 'file') {
-                  const itemPath = sidePath(row.file, side);
+                if (row.kind === 'file' || row.kind === 'previewFile') {
+                  const itemPath = row.kind === 'file' ? sidePath(row.file, side) : row.absolutePath;
 
                   if (itemPath) {
                     window.safetwin.showItemInFolder(itemPath).catch((openError: unknown) => {
@@ -932,7 +1072,7 @@ const App = () => {
               <span className="row-icon">
                 {row.kind === 'parent' ? (
                   <ChevronLeft size={16} aria-hidden="true" />
-                ) : row.kind === 'folder' ? (
+                ) : row.kind === 'folder' || row.kind === 'previewFolder' ? (
                   <Folder size={16} aria-hidden="true" />
                 ) : (
                   getFileIcon(row.relativePath)
@@ -940,7 +1080,13 @@ const App = () => {
               </span>
               <span className="row-name">{row.name}</span>
               <span className="row-status">{indicatorFor(row, side)}</span>
-              <span className="row-size">{row.kind === 'file' ? formatBytes(row.file.sizeBytes) : ''}</span>
+              <span className="row-size">
+                {row.kind === 'file'
+                  ? formatBytes(row.file.sizeBytes)
+                  : row.kind === 'previewFile'
+                    ? formatBytes(row.sizeBytes)
+                    : ''}
+              </span>
             </button>
           );
         })}

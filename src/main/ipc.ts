@@ -1,4 +1,6 @@
 import { dialog, ipcMain, shell } from 'electron';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type {
   CleanupPreviewInput,
   CreateCleanupOperationInput,
@@ -39,6 +41,55 @@ export const registerIpcHandlers = async (): Promise<void> => {
       canceled: result.canceled,
       path: result.filePaths[0] ?? null,
     };
+  });
+
+  ipcMain.handle('safetwin:list-directory', async (_event, rootPath: string, relativePath = '') => {
+    const normalizedRelativePath = relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
+    const directoryPath = path.resolve(rootPath, normalizedRelativePath);
+    const resolvedRoot = path.resolve(rootPath);
+    const relativeFromRoot = path.relative(resolvedRoot, directoryPath);
+
+    if (relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+      throw new Error('Directory is outside the selected folder.');
+    }
+
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+
+    const previewEntries = await Promise.all(
+      visibleEntries.map(async (entry) => {
+        const entryRelativePath = normalizedRelativePath
+          ? `${normalizedRelativePath}/${entry.name}`
+          : entry.name;
+        const absolutePath = path.join(directoryPath, entry.name);
+        const kind = entry.isDirectory() ? 'folder' : 'file';
+        let sizeBytes = 0;
+
+        if (kind === 'file') {
+          try {
+            sizeBytes = (await fs.stat(absolutePath)).size;
+          } catch {
+            sizeBytes = 0;
+          }
+        }
+
+        return {
+          name: entry.name,
+          relativePath: entryRelativePath.replaceAll('\\', '/'),
+          absolutePath,
+          kind,
+          sizeBytes,
+        };
+      }),
+    );
+
+    return previewEntries.sort((left, right) => {
+      if (left.kind !== right.kind) {
+        return left.kind === 'folder' ? -1 : 1;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
   });
 
   ipcMain.handle('safetwin:list-folder-pairs', () => folderPairs.listFolderPairs());
