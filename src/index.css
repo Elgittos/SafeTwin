@@ -334,7 +334,8 @@ select {
   min-height: 32px;
 }
 
-.cleanup-preview {
+.cleanup-preview,
+.operation-preview {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -344,6 +345,18 @@ select {
   background: #fff7da;
   border-bottom: 1px solid #ead79a;
   font-size: 13px;
+}
+
+.operation-preview {
+  color: #123f63;
+  border-bottom: 1px solid #b8d7f0;
+  background: #e8f5ff;
+}
+
+.theme-dark .operation-preview {
+  color: #b9dcf5;
+  border-color: #244b67;
+  background: #132536;
 }
 
 .path-panels {
@@ -695,7 +708,7 @@ select {
 
 .drawer-item {
   display: grid;
-  grid-template-columns: 88px minmax(150px, 1fr) 92px 34px;
+  grid-template-columns: 88px minmax(150px, 1fr) 44px 92px 34px 34px;
   gap: 8px;
   align-items: center;
   min-height: 30px;

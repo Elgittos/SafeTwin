@@ -91,4 +91,36 @@ describe('compareFiles', () => {
     expect(result.folders.find((folder) => folder.relativePath === 'Documents')?.counts.ignored).toBe(1);
     expect(result.folders.find((folder) => folder.relativePath === '')?.displayPath).toBe('Root');
   });
+
+  it('uses deep-scan hashes to detect same-size same-time conflicts', () => {
+    const result = compareFiles({
+      originFiles: [
+        file({
+          relativePath: 'photo.jpg',
+          normalizedKey: 'photo.jpg',
+          size: 10,
+          mtimeMs: 1,
+          hash: 'origin-hash',
+          hashCalculatedAt: '2026-05-06T12:00:00.000Z',
+        }),
+      ],
+      backupFiles: [
+        file({
+          side: 'backup',
+          relativePath: 'photo.jpg',
+          absolutePath: 'D:\\backup\\photo.jpg',
+          normalizedKey: 'photo.jpg',
+          size: 10,
+          mtimeMs: 1,
+          hash: 'backup-hash',
+          hashCalculatedAt: '2026-05-06T12:00:00.000Z',
+        }),
+      ],
+      ignoredFiles: [],
+      skippedFiles: [],
+    });
+
+    expect(result.files[0].state).toBe('conflictSamePathDifferentContent');
+    expect(result.files[0].reason).toBe('Same relative path with different hash');
+  });
 });

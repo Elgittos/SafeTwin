@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
+  ArrowLeftRight,
   Check,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Cloud,
@@ -50,6 +52,12 @@ import type {
 type PaneSide = 'origin' | 'backup';
 type ThemeMode = 'light' | 'dark';
 type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
+
+interface CopyPreview {
+  filesSelected: number;
+  conflictsSelected: number;
+  totalSize: number;
+}
 
 interface ParentRow {
   kind: 'parent';
@@ -137,6 +145,41 @@ const formatDate = (value: string | null): string => {
   }).format(new Date(value));
 };
 
+const toFriendlyError = (error: unknown, fallback: string): string => {
+  const rawMessage = error instanceof Error ? error.message : fallback;
+  const message = rawMessage.toLowerCase();
+
+  if (message.includes('ebusy') || message.includes('being used') || message.includes('locked')) {
+    return `${fallback} This file is being used by another app. ${rawMessage}`;
+  }
+
+  if (message.includes('eacces') || message.includes('eperm') || message.includes('permission')) {
+    return `${fallback} SafeTwin does not have permission to access this path. ${rawMessage}`;
+  }
+
+  if (message.includes('cloud') || message.includes('placeholder') || message.includes('not ready')) {
+    return `${fallback} This file is cloud-only or not available locally. ${rawMessage}`;
+  }
+
+  if (message.includes('enospc') || message.includes('not enough') || message.includes('disk full')) {
+    return `${fallback} The backup drive does not have enough free space. ${rawMessage}`;
+  }
+
+  if (message.includes('hash') || message.includes('verification') || message.includes('mismatch')) {
+    return `${fallback} The copied file did not pass verification. ${rawMessage}`;
+  }
+
+  if (message.includes('enametoolong') || message.includes('path too long')) {
+    return `${fallback} This file path is too long for the current operation. ${rawMessage}`;
+  }
+
+  if (message.includes('changed during') || message.includes('unstable')) {
+    return `${fallback} This file changed during the operation and was skipped. ${rawMessage}`;
+  }
+
+  return rawMessage || fallback;
+};
+
 const normalizePath = (relativePath: string): string =>
   relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
 
@@ -198,6 +241,8 @@ const sidePath = (file: FileCompareItem, side: PaneSide): string | null =>
 const skippedCount = (summary: ScanSummary): number =>
   summary.notLocalPlaceholder + summary.lockedOrUnreadable + summary.unstableChangingFile;
 
+const progressPercent = (done: number, total: number): number => (total > 0 ? Math.round((done / total) * 100) : 0);
+
 const stateLabel = (file: FileCompareItem): string => {
   if (file.state === 'missingInBackup') {
     return 'missing in backup ready to copy';
@@ -247,6 +292,15 @@ const descendantCount = (paths: Set<string>, folderPath: string): number => {
   }
 
   return count;
+};
+
+const isInsideSelectedFolderPath = (file: FileCompareItem, folderPaths: string[]): boolean => {
+  const displayPath = normalizePath(file.displayPath).toLowerCase();
+
+  return folderPaths.some((folderPath) => {
+    const normalizedFolder = normalizePath(folderPath).toLowerCase();
+    return displayPath === normalizedFolder || displayPath.startsWith(`${normalizedFolder}/`);
+  });
 };
 
 const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>): boolean => {
@@ -542,7 +596,9 @@ const App = () => {
   const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
+  const [operationHistory, setOperationHistory] = useState<OperationSnapshot[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
+  const [copyPreview, setCopyPreview] = useState<CopyPreview | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
   const [ignoreRules, setIgnoreRules] = useState<IgnoreRuleSetting[]>([]);
   const [ignoredFiles, setIgnoredFiles] = useState<{ path: string; reason: string }[]>([]);
@@ -552,7 +608,10 @@ const App = () => {
   const [cleanupMode, setCleanupMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
-  const [theme, setTheme] = useState<ThemeMode>('light');
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const savedTheme = window.localStorage.getItem('safetwin-theme');
+    return savedTheme === 'dark' ? 'dark' : 'light';
+  });
   const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
@@ -584,8 +643,10 @@ const App = () => {
   );
   const selectedFiles = useMemo(() => {
     const selected = new Set(selectedPaths);
-    return (scanResult?.files ?? []).filter((file) => selected.has(file.relativePath));
-  }, [scanResult, selectedPaths]);
+    return (scanResult?.files ?? []).filter(
+      (file) => selected.has(file.relativePath) || isInsideSelectedFolderPath(file, selectedFolderPaths),
+    );
+  }, [scanResult, selectedFolderPaths, selectedPaths]);
   const copySelectedFiles = useMemo(() => selectedFiles.filter(canCopy), [selectedFiles]);
   const cleanupSelectedFiles = useMemo(() => selectedFiles.filter(canCleanup), [selectedFiles]);
   const conflictSelectedFiles = useMemo(
@@ -595,6 +656,18 @@ const App = () => {
   const selectedBytes = useMemo(
     () => selectedFiles.reduce((total, file) => total + file.sizeBytes, 0),
     [selectedFiles],
+  );
+  const lastCopyAt = useMemo(
+    () =>
+      operationHistory.find((snapshot) => snapshot.operation.type === 'copy' && snapshot.operation.completedAt)
+        ?.operation.completedAt ?? null,
+    [operationHistory],
+  );
+  const lastCleanupAt = useMemo(
+    () =>
+      operationHistory.find((snapshot) => snapshot.operation.type === 'cleanup' && snapshot.operation.completedAt)
+        ?.operation.completedAt ?? null,
+    [operationHistory],
   );
   const reminderMessage = useMemo(() => {
     if (!activePair?.reminderIntervalDays) {
@@ -670,7 +743,7 @@ const App = () => {
       setActivePairId(pair.id);
       setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
     } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : 'Scan failed.');
+      setError(toFriendlyError(scanError, 'Scan failed.'));
     } finally {
       setIsScanning(false);
       window.setTimeout(() => setScanProgress(null), 1400);
@@ -686,12 +759,14 @@ const App = () => {
     setRightPath('');
     setSelectedPaths([]);
     setSelectedFolderPaths([]);
+    setCopyPreview(null);
     setCleanupPreview(null);
     setError(null);
 
     const status = await window.safetwin.getLastStatus(pair.id);
     setScanResult(status.lastScan);
     const operations = await window.safetwin.listOperations(pair.id);
+    setOperationHistory(operations);
     setOperation(operations[0] ?? null);
     setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
 
@@ -711,7 +786,7 @@ const App = () => {
 
   useEffect(() => {
     Promise.all([loadPairs(), window.safetwin.listIgnoreRules().then(setIgnoreRules)]).catch((loadError: unknown) => {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load SafeTwin data.');
+      setError(toFriendlyError(loadError, 'Could not load SafeTwin data.'));
     });
   }, []);
 
@@ -720,6 +795,10 @@ const App = () => {
       setScanProgress(progress);
     });
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('safetwin-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     let canceled = false;
@@ -739,7 +818,7 @@ const App = () => {
       .catch((previewError: unknown) => {
         if (!canceled) {
           setOriginPreviewEntries([]);
-          setError(previewError instanceof Error ? previewError.message : 'Could not read origin folder.');
+          setError(toFriendlyError(previewError, 'Could not read origin folder.'));
         }
       });
 
@@ -766,7 +845,7 @@ const App = () => {
       .catch((previewError: unknown) => {
         if (!canceled) {
           setBackupPreviewEntries([]);
-          setError(previewError instanceof Error ? previewError.message : 'Could not read backup folder.');
+          setError(toFriendlyError(previewError, 'Could not read backup folder.'));
         }
       });
 
@@ -791,11 +870,13 @@ const App = () => {
             setScanResult(status.lastScan);
             setSelectedPaths([]);
             setSelectedFolderPaths([]);
+            setCopyPreview(null);
             setCleanupPreview(null);
+            setOperationHistory(await window.safetwin.listOperations(activePairId));
           }
         })
         .catch((pollError: unknown) => {
-          setError(pollError instanceof Error ? pollError.message : 'Could not refresh operation.');
+          setError(toFriendlyError(pollError, 'Could not refresh operation.'));
         });
     }, 700);
 
@@ -832,8 +913,37 @@ const App = () => {
         const savedPair = await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
         await scanSavedPair(savedPair);
       } catch (folderError) {
-        setError(folderError instanceof Error ? folderError.message : 'Could not scan selected folders.');
+        setError(toFriendlyError(folderError, 'Could not scan selected folders.'));
       }
+    }
+  };
+
+  const swapRoles = async () => {
+    if (!originPath || !backupPath) {
+      setError('Choose both an origin folder and a backup folder before swapping roles.');
+      return;
+    }
+
+    const nextOriginPath = backupPath;
+    const nextBackupPath = originPath;
+    const nextPairName = getDefaultPairName(nextOriginPath, nextBackupPath);
+    setOriginPath(nextOriginPath);
+    setBackupPath(nextBackupPath);
+    setPairName(nextPairName);
+    setLeftPath('');
+    setRightPath('');
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCopyPreview(null);
+    setCleanupPreview(null);
+    setScanResult(null);
+    setError(null);
+
+    try {
+      const savedPair = await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
+      await scanSavedPair(savedPair);
+    } catch (swapError) {
+      setError(toFriendlyError(swapError, 'Could not swap origin and backup.'));
     }
   };
 
@@ -846,7 +956,7 @@ const App = () => {
       const savedPair = await savePair();
       await scanSavedPair(savedPair, mode);
     } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : 'Scan failed.');
+      setError(toFriendlyError(scanError, 'Scan failed.'));
     }
   };
 
@@ -871,8 +981,12 @@ const App = () => {
       return;
     }
 
-    const updatedPair = await window.safetwin.updateFolderPairSettings({ id: activePairId, ...patch });
-    setPairs((current) => current.map((pair) => (pair.id === updatedPair.id ? updatedPair : pair)));
+    try {
+      const updatedPair = await window.safetwin.updateFolderPairSettings({ id: activePairId, ...patch });
+      setPairs((current) => current.map((pair) => (pair.id === updatedPair.id ? updatedPair : pair)));
+    } catch (settingsError) {
+      setError(toFriendlyError(settingsError, 'Could not update folder-pair settings.'));
+    }
   };
 
   const toggleSelectedPath = (file: FileCompareItem) => {
@@ -889,8 +1003,54 @@ const App = () => {
     );
   };
 
-  const createCopyQueue = async (paths: string[]) => {
-    if (!activePairId || paths.length === 0) {
+  const toggleSelectedFolderPath = (relativePath: string) => {
+    setSelectedFolderPaths((current) =>
+      current.includes(relativePath)
+        ? current.filter((selectedPath) => selectedPath !== relativePath)
+        : [...current, relativePath],
+    );
+  };
+
+  const rowIsSelectable = (row: PaneRow): boolean => {
+    if (row.kind === 'file') {
+      return cleanupMode ? canCleanup(row.file) : canCopy(row.file);
+    }
+
+    if (row.kind !== 'folder') {
+      return false;
+    }
+
+    if (cleanupMode) {
+      return row.side === 'backup' && row.counts.backupOnly > 0;
+    }
+
+    return row.side === 'origin' && (row.counts.missingInBackup > 0 || row.counts.conflicts > 0);
+  };
+
+  const selectVisibleEligible = () => {
+    const paths = new Set(selectedPaths);
+
+    for (const row of [...leftRows, ...rightRows]) {
+      if (row.kind === 'file' && rowIsSelectable(row)) {
+        paths.add(row.file.relativePath);
+      }
+    }
+
+    setSelectionMode(true);
+    setSelectedPaths([...paths]);
+    setCleanupPreview(null);
+    setCopyPreview(null);
+  };
+
+  const clearSelection = () => {
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCleanupPreview(null);
+    setCopyPreview(null);
+  };
+
+  const createCopyQueue = async (paths: string[], folderPaths: string[] = []) => {
+    if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
       return;
     }
 
@@ -901,12 +1061,20 @@ const App = () => {
       const nextOperation = await window.safetwin.createCopyOperation({
         folderPairId: activePairId,
         selectedRelativePaths: paths,
+        selectedFolderPaths: folderPaths,
         verificationLevel,
       });
       setOperation(nextOperation);
+      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
+      setCopyPreview({
+        filesSelected: nextOperation.totals.totalItems,
+        conflictsSelected: nextOperation.items.filter((item) => item.action === 'copyConflictDuplicate').length,
+        totalSize: nextOperation.totals.bytesTotal,
+      });
       setCleanupMode(false);
+      setCleanupPreview(null);
     } catch (operationError) {
-      setError(operationError instanceof Error ? operationError.message : 'Could not create copy queue.');
+      setError(toFriendlyError(operationError, 'Could not create copy queue.'));
     } finally {
       setIsPreparingOperation(false);
     }
@@ -927,8 +1095,9 @@ const App = () => {
         selectedFolderPaths,
       });
       setCleanupPreview(preview);
+      setCopyPreview(null);
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : 'Could not create cleanup preview.');
+      setError(toFriendlyError(previewError, 'Could not create cleanup preview.'));
     } finally {
       setIsPreparingOperation(false);
     }
@@ -949,9 +1118,11 @@ const App = () => {
         selectedFolderPaths,
       });
       setOperation(nextOperation);
+      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
+      setCopyPreview(null);
       setCleanupPreview(null);
     } catch (operationError) {
-      setError(operationError instanceof Error ? operationError.message : 'Could not create cleanup queue.');
+      setError(toFriendlyError(operationError, 'Could not create cleanup queue.'));
     } finally {
       setIsPreparingOperation(false);
     }
@@ -974,8 +1145,9 @@ const App = () => {
                 ? await window.safetwin.cancelOperation(operation.operation.id)
                 : await window.safetwin.retryFailedOperation(operation.operation.id);
       setOperation(nextOperation);
+      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
     } catch (commandError) {
-      setError(commandError instanceof Error ? commandError.message : 'Operation command failed.');
+      setError(toFriendlyError(commandError, 'Operation command failed.'));
     }
   };
 
@@ -1011,12 +1183,13 @@ const App = () => {
       <div className="pane-list">
         {rows.map((row) => {
           const selected = row.kind === 'file' && selectedPaths.includes(row.relativePath);
-          const eligible = row.kind === 'file' && (cleanupMode ? canCleanup(row.file) : canCopy(row.file));
+          const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
+          const eligible = rowIsSelectable(row);
           const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
 
           return (
             <button
-              className={selected ? 'explorer-row explorer-row-selected' : 'explorer-row'}
+              className={selected || folderSelected ? 'explorer-row explorer-row-selected' : 'explorer-row'}
               key={`${side}-${row.kind}-${row.relativePath}`}
               type="button"
               onClick={() => {
@@ -1032,7 +1205,7 @@ const App = () => {
 
                   if (itemPath) {
                     window.safetwin.showItemInFolder(itemPath).catch((openError: unknown) => {
-                      setError(openError instanceof Error ? openError.message : 'Could not open item folder.');
+                      setError(toFriendlyError(openError, 'Could not open item folder.'));
                     });
                   }
                 }
@@ -1047,6 +1220,15 @@ const App = () => {
                     onChange={() => toggleSelectedPath(row.file)}
                     onClick={(event) => event.stopPropagation()}
                     aria-label={`Select ${row.name}`}
+                  />
+                ) : selectionMode && row.kind === 'folder' ? (
+                  <input
+                    type="checkbox"
+                    checked={folderSelected}
+                    disabled={!eligible}
+                    onChange={() => toggleSelectedFolderPath(row.relativePath)}
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`Select folder ${row.name}`}
                   />
                 ) : null}
               </span>
@@ -1094,7 +1276,7 @@ const App = () => {
 
               if (pair) {
                 loadPairState(pair).catch((loadError: unknown) => {
-                  setError(loadError instanceof Error ? loadError.message : 'Could not load folder pair.');
+                  setError(toFriendlyError(loadError, 'Could not load folder pair.'));
                 });
               }
             }}
@@ -1132,6 +1314,10 @@ const App = () => {
         <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
           <HardDrive size={16} aria-hidden="true" />
           Deep Scan
+        </button>
+        <button type="button" onClick={swapRoles} disabled={!originPath || !backupPath || isScanning}>
+          <ArrowLeftRight size={16} aria-hidden="true" />
+          Swap Roles
         </button>
         <button
           type="button"
@@ -1174,7 +1360,8 @@ const App = () => {
 
       <section className="status-strip">
         <span>Last scan: {formatDate(activePair?.lastScanAt ?? null)}</span>
-        <span>Last copy: {formatDate(activePair?.lastOperationAt ?? null)}</span>
+        <span>Last copy: {formatDate(lastCopyAt)}</span>
+        <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
         <span>
           Missing in backup: {scanResult?.summary.missingInBackup ?? 0} files /{' '}
           {formatBytes(scanResult?.summary.totalMissingSize ?? 0)}
@@ -1184,7 +1371,8 @@ const App = () => {
           {formatBytes(scanResult?.summary.totalBackupOnlySize ?? 0)}
         </span>
         <span>Conflicts: {scanResult?.summary.conflicts ?? 0}</span>
-        <span>Skipped placeholders: {scanResult?.summary.notLocalPlaceholder ?? 0}</span>
+        <span>Ignored: {scanResult?.summary.ignored ?? 0}</span>
+        <span>Skipped: {skippedCount(scanResult?.summary ?? emptySummary())}</span>
       </section>
 
       {reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
@@ -1256,6 +1444,13 @@ const App = () => {
         >
           Select
         </button>
+        <button type="button" disabled={!scanResult} onClick={selectVisibleEligible}>
+          <CheckSquare size={15} aria-hidden="true" />
+          Select visible
+        </button>
+        <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
+          Clear
+        </button>
         <span>
           {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
         </span>
@@ -1268,7 +1463,11 @@ const App = () => {
           <option value="basic">Size verify</option>
           <option value="strong">Hash verify</option>
         </select>
-        <button type="button" disabled={copySelectedFiles.length === 0} onClick={() => createCopyQueue(copySelectedFiles.map((file) => file.relativePath))}>
+        <button
+          type="button"
+          disabled={cleanupMode || (copySelectedFiles.length === 0 && selectedFolderPaths.length === 0)}
+          onClick={() => createCopyQueue(copySelectedFiles.map((file) => file.relativePath), selectedFolderPaths)}
+        >
           Copy selected
         </button>
         <button
@@ -1280,7 +1479,7 @@ const App = () => {
         >
           Copy all missing
         </button>
-        <button type="button" disabled={conflictSelectedFiles.length === 0} onClick={() => createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath))}>
+        <button type="button" disabled={cleanupMode || conflictSelectedFiles.length === 0} onClick={() => createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath))}>
           Copy selected conflicts as duplicates
         </button>
         {cleanupMode ? (
@@ -1294,6 +1493,16 @@ const App = () => {
           </>
         ) : null}
       </section>
+
+      {copyPreview ? (
+        <section className="operation-preview">
+          <strong>Copy preview</strong>
+          <span>Files selected: {copyPreview.filesSelected}</span>
+          <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span>
+          <span>Total size: {formatBytes(copyPreview.totalSize)}</span>
+          <span>Action: copy Origin to Backup; existing Backup files stay preserved</span>
+        </section>
+      ) : null}
 
       {cleanupPreview ? (
         <section className="cleanup-preview">
@@ -1347,7 +1556,7 @@ const App = () => {
                       .setIgnoreRuleCategoryEnabled(category, event.target.checked)
                       .then(setIgnoreRules)
                       .catch((ignoreError: unknown) => {
-                        setError(ignoreError instanceof Error ? ignoreError.message : 'Could not update ignore rules.');
+                        setError(toFriendlyError(ignoreError, 'Could not update ignore rules.'));
                       })
                   }
                 />
@@ -1407,21 +1616,31 @@ const App = () => {
             <span>
               {formatBytes(operation.totals.bytesDone)} / {formatBytes(operation.totals.bytesTotal)}
             </span>
+            <span>{progressPercent(operation.totals.bytesDone, operation.totals.bytesTotal)}%</span>
             <span>{formatBytes(operation.totals.currentSpeedBytesPerSecond)}/s</span>
           </div>
           <div className="drawer-items">
             {operation.items.slice(0, 10).map((item) => (
               <div className="drawer-item" key={item.id}>
                 <span className={`queue-state queue-state-${item.state}`}>{item.state}</span>
-                <span>{item.relativePath}</span>
+                <span title={`${item.sourcePath ?? ''}\n${item.destinationPath ?? ''}`}>{item.relativePath}</span>
+                <small>{progressPercent(item.bytesDone, item.bytesTotal)}%</small>
                 <small>{item.verificationState}</small>
                 <button
                   type="button"
-                  title="Open item folder"
-                  disabled={!item.destinationPath && !item.sourcePath}
-                  onClick={() => window.safetwin.showItemInFolder(item.destinationPath ?? item.sourcePath ?? '')}
+                  title="Open source folder"
+                  disabled={!item.sourcePath}
+                  onClick={() => item.sourcePath && window.safetwin.showItemInFolder(item.sourcePath)}
                 >
                   <FolderOpen size={14} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  title="Open backup folder"
+                  disabled={!item.destinationPath}
+                  onClick={() => item.destinationPath && window.safetwin.showItemInFolder(item.destinationPath)}
+                >
+                  <HardDrive size={14} aria-hidden="true" />
                 </button>
               </div>
             ))}

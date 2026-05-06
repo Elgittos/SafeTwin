@@ -72,8 +72,13 @@ export const incrementSummary = (summary: ScanSummary, state: FileCompareState, 
   }
 };
 
-const metadataMatches = (origin: ScannedFile, backup: ScannedFile): boolean =>
-  origin.size === backup.size && origin.mtimeMs === backup.mtimeMs;
+const fileContentMatches = (origin: ScannedFile, backup: ScannedFile): boolean => {
+  if (origin.hash && backup.hash) {
+    return origin.hash === backup.hash;
+  }
+
+  return origin.size === backup.size && origin.mtimeMs === backup.mtimeMs;
+};
 
 const mapSkippedState = (file: ScannedFile): FileCompareState => {
   if (file.availabilityState === 'cloudPlaceholder') {
@@ -163,14 +168,14 @@ export const compareFiles = (input: CompareInput): CompareOutput => {
       state = 'backupOnly';
       sizeBytes = backup.size;
       reason = 'Exists in backup but not in origin';
-    } else if (origin && backup && metadataMatches(origin, backup)) {
+    } else if (origin && backup && fileContentMatches(origin, backup)) {
       state = 'identical';
       sizeBytes = origin.size;
-      reason = 'Same size and modified time';
+      reason = origin.hash && backup.hash ? 'Same SHA-256 hash' : 'Same size and modified time';
     } else {
       state = 'conflictSamePathDifferentContent';
       sizeBytes = Math.max(origin?.size ?? 0, backup?.size ?? 0);
-      reason = 'Same relative path with different metadata';
+      reason = origin?.hash && backup?.hash ? 'Same relative path with different hash' : 'Same relative path with different metadata';
     }
 
     incrementSummary(summary, state, sizeBytes);

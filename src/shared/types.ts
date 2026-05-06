@@ -179,6 +179,7 @@ export interface OperationSnapshot {
 export interface CreateCopyOperationInput {
   folderPairId: number;
   selectedRelativePaths: string[];
+  selectedFolderPaths?: string[];
   verificationLevel?: VerificationLevel;
 }
 

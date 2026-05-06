@@ -82,9 +82,11 @@ export class OperationQueueService {
       throw new Error('Run a scan before creating a copy operation.');
     }
 
-    const candidates = filterSelectedFiles(status.lastScan.files, input.selectedRelativePaths).filter(
-      (file) => file.state === 'missingInBackup' || file.state === 'conflictSamePathDifferentContent',
-    );
+    const candidates = filterSelectedFiles(
+      status.lastScan.files,
+      input.selectedRelativePaths,
+      input.selectedFolderPaths ?? [],
+    ).filter((file) => file.state === 'missingInBackup' || file.state === 'conflictSamePathDifferentContent');
 
     if (candidates.length === 0) {
       throw new Error('Select missing or conflict files before creating a copy operation.');

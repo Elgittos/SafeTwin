@@ -6,6 +6,7 @@ import type { FolderSide, LocalAvailability, ScanMode } from '../../shared/types
 import { IgnoreRuleService } from '../ignore/ignoreRules';
 import { isProtectedWindowsDirectoryName } from '../platform/protectedWindowsPaths';
 import { getLocalAvailability } from '../platform/windowsFileAvailability';
+import { hashFileSha256 } from './hashService';
 
 export type AvailabilityState = LocalAvailability | 'unstable';
 
@@ -195,6 +196,9 @@ export const walkFiles = async (
 
       const stats = await fs.stat(absolutePath);
 
+      const hash = options.mode === 'deep' ? await hashFileSha256(absolutePath) : null;
+      const hashCalculatedAt = hash ? new Date().toISOString() : null;
+
       files.push({
         side,
         relativePath,
@@ -207,8 +211,8 @@ export const walkFiles = async (
         extension: getExtension(relativePath),
         availabilityState: availability,
         ignoreReason: null,
-        hash: null,
-        hashCalculatedAt: null,
+        hash,
+        hashCalculatedAt,
       });
       reportProgress(absolutePath);
     }

@@ -162,6 +162,25 @@ describe('OperationQueueService', () => {
     }
   });
 
+  it('creates copy operations from selected folders', async () => {
+    const { root, db, folderPairs, scanner, operations } = await setupServices();
+
+    try {
+      const pair = await createScannedPair(folderPairs, scanner, root);
+      const copyOperation = await operations.createCopyOperation({
+        folderPairId: pair.id,
+        selectedRelativePaths: [],
+        selectedFolderPaths: ['nested'],
+        verificationLevel: 'basic',
+      });
+
+      expect(copyOperation.items).toHaveLength(1);
+      expect(copyOperation.items[0].action).toBe('copyConflictDuplicate');
+    } finally {
+      db.close();
+    }
+  });
+
   it('removes abandoned temp files and marks interrupted running rows failed', async () => {
     const { root, db, folderPairs, operations } = await setupServices();
     const repository = new OperationRepository(db);
