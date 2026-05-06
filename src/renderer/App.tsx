@@ -65,7 +65,7 @@ const filterOptions: Array<[FilterKey, string]> = [
   ['all', 'All'],
 ];
 
-const showAdvancedControls = false;
+const showAdvancedControls = true;
 
 interface CopyPreview {
   filesSelected: number;
@@ -783,9 +783,10 @@ const App = () => {
     const savedTheme = window.localStorage.getItem('safetwin-theme');
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
-  const [filter, setFilter] = useState<FilterKey>(() =>
-    window.localStorage.getItem('safetwin-view-filter') === 'missing' ? 'missing' : 'all',
-  );
+  const [filter, setFilter] = useState<FilterKey>(() => {
+    const savedFilter = window.localStorage.getItem('safetwin-view-filter') as FilterKey | null;
+    return savedFilter && filterOptions.some(([value]) => value === savedFilter) ? savedFilter : 'all';
+  });
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
   const [isScanning, setIsScanning] = useState(false);
@@ -1068,7 +1069,7 @@ const App = () => {
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem('safetwin-view-filter', filter === 'missing' ? 'missing' : 'all');
+    window.localStorage.setItem('safetwin-view-filter', filter);
   }, [filter]);
 
   useEffect(() => {
@@ -1829,35 +1830,17 @@ const App = () => {
             <label className="compact-field">
               Show
               <select
-                aria-label="Folder view"
-                value={filter === 'missing' ? 'missing' : 'all'}
-                onChange={(event) => setFilter(event.target.value === 'missing' ? 'missing' : 'all')}
+                aria-label="View filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value as FilterKey)}
               >
-                <option value="all">Full folder tree</option>
-                <option value="missing">Missing only</option>
+                {filterOptions.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {value === 'all' ? 'Full folder tree' : label}
+                  </option>
+                ))}
               </select>
             </label>
-          </section>
-
-          {showAdvancedControls ? (
-          <section className="side-section">
-            <h2>Find</h2>
-            {showAdvancedControls ? (
-              <label className="compact-field">
-                Filter
-                <select
-                  aria-label="View filter"
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value as FilterKey)}
-                >
-                  {filterOptions.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
             <div className="search-box">
               <Search size={15} aria-hidden="true" />
               <input
@@ -1890,7 +1873,6 @@ const App = () => {
               Mirror navigation
             </label>
           </section>
-          ) : null}
 
           {showAdvancedControls ? (
           <section className="side-section">
