@@ -53,6 +53,8 @@ type PaneSide = 'origin' | 'backup';
 type ThemeMode = 'light' | 'dark';
 type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
 
+const autoScanSessionKeys = new Set<string>();
+
 interface CopyPreview {
   filesSelected: number;
   conflictsSelected: number;
@@ -844,6 +846,14 @@ const App = () => {
     }
   };
 
+  const scanPairInBackground = async (pair: FolderPair, mode: ScanMode = 'metadata') => {
+    if (isScanning) {
+      return;
+    }
+
+    await scanSavedPair(pair, mode);
+  };
+
   const loadPairState = async (pair: FolderPair) => {
     setActivePairId(pair.id);
     setOriginPath(pair.originPath);
@@ -890,6 +900,21 @@ const App = () => {
   useEffect(() => {
     window.localStorage.setItem('safetwin-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!activePair || !originPath || !backupPath || isScanning) {
+      return;
+    }
+
+    const autoScanKey = `${activePair.id}:${originPath}:${backupPath}`;
+
+    if (autoScanSessionKeys.has(autoScanKey)) {
+      return;
+    }
+
+    autoScanSessionKeys.add(autoScanKey);
+    void scanPairInBackground(activePair);
+  }, [activePair, backupPath, isScanning, originPath]);
 
   useEffect(() => {
     let canceled = false;
@@ -1525,6 +1550,9 @@ const App = () => {
             ['missing', 'Ready to copy'],
             ['conflicts', 'Conflicts'],
             ['backupOnly', 'Backup-only'],
+            ['ignored', 'Ignored'],
+            ['skipped', 'Skipped'],
+            ['failed', 'Failed'],
             ['all', 'All'],
           ].map(([value, label]) => (
             <button
