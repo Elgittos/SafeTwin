@@ -6,12 +6,18 @@ import type {
   SafeTwinApi,
   SaveFolderPairInput,
   ScanMode,
+  UpdateFolderPairSettingsInput,
 } from './shared/types';
 
 const api: SafeTwinApi = {
   chooseFolder: () => ipcRenderer.invoke('safetwin:choose-folder'),
   listFolderPairs: () => ipcRenderer.invoke('safetwin:list-folder-pairs'),
   saveFolderPair: (input: SaveFolderPairInput) => ipcRenderer.invoke('safetwin:save-folder-pair', input),
+  updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) =>
+    ipcRenderer.invoke('safetwin:update-folder-pair-settings', input),
+  listIgnoreRules: () => ipcRenderer.invoke('safetwin:list-ignore-rules'),
+  setIgnoreRuleCategoryEnabled: (category: string, enabled: boolean) =>
+    ipcRenderer.invoke('safetwin:set-ignore-rule-category-enabled', category, enabled),
   scanPair: (pairId: number, mode: ScanMode = 'metadata') => ipcRenderer.invoke('safetwin:scan-pair', pairId, mode),
   getIgnoredFiles: (pairId: number) => ipcRenderer.invoke('safetwin:get-ignored-files', pairId),
   getLastStatus: (pairId: number) => ipcRenderer.invoke('safetwin:get-last-status', pairId),

@@ -47,11 +47,27 @@ export interface SaveFolderPairInput {
   name: string;
   originPath: string;
   backupPath: string;
+  mirrorNavigationEnabled?: boolean;
+  reminderIntervalDays?: number | null;
+}
+
+export interface UpdateFolderPairSettingsInput {
+  id: number;
+  mirrorNavigationEnabled?: boolean;
+  reminderIntervalDays?: number | null;
 }
 
 export interface IgnoredFile {
   path: string;
   reason: string;
+}
+
+export interface IgnoreRuleSetting {
+  id: number;
+  category: string;
+  pattern: string;
+  reason: string;
+  enabled: boolean;
 }
 
 export interface ScanSummary {
@@ -194,6 +210,9 @@ export interface SafeTwinApi {
   chooseFolder: () => Promise<ChooseFolderResult>;
   listFolderPairs: () => Promise<FolderPair[]>;
   saveFolderPair: (input: SaveFolderPairInput) => Promise<FolderPair>;
+  updateFolderPairSettings: (input: UpdateFolderPairSettingsInput) => Promise<FolderPair>;
+  listIgnoreRules: () => Promise<IgnoreRuleSetting[]>;
+  setIgnoreRuleCategoryEnabled: (category: string, enabled: boolean) => Promise<IgnoreRuleSetting[]>;
   scanPair: (pairId: number, mode?: ScanMode) => Promise<ScanResult>;
   getIgnoredFiles: (pairId: number) => Promise<IgnoredFile[]>;
   getLastStatus: (pairId: number) => Promise<LastStatus>;

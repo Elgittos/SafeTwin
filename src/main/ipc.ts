@@ -5,6 +5,7 @@ import type {
   CreateCopyOperationInput,
   SaveFolderPairInput,
   ScanMode,
+  UpdateFolderPairSettingsInput,
 } from '../shared/types';
 import { initializeSchema } from './db/schema';
 import { getOperationsLogPath, openDatabase } from './db/sqlite';
@@ -44,6 +45,16 @@ export const registerIpcHandlers = async (): Promise<void> => {
 
   ipcMain.handle('safetwin:save-folder-pair', (_event, input: SaveFolderPairInput) =>
     folderPairs.saveFolderPair(input),
+  );
+
+  ipcMain.handle('safetwin:update-folder-pair-settings', (_event, input: UpdateFolderPairSettingsInput) =>
+    folderPairs.updateSettings(input),
+  );
+
+  ipcMain.handle('safetwin:list-ignore-rules', () => ignoreRules.listRules());
+
+  ipcMain.handle('safetwin:set-ignore-rule-category-enabled', (_event, category: string, enabled: boolean) =>
+    ignoreRules.setCategoryEnabled(category, enabled),
   );
 
   ipcMain.handle('safetwin:scan-pair', async (_event, pairId: number, mode: ScanMode = 'metadata') => {

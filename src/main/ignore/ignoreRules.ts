@@ -1,4 +1,5 @@
 import picomatch from 'picomatch';
+import type { IgnoreRuleSetting } from '../../shared/types';
 import type { SqliteDatabase } from '../db/sqlite';
 import { defaultIgnoreRules, type DefaultIgnoreRule } from './defaultIgnoreRules';
 
@@ -43,6 +44,40 @@ export class IgnoreRuleService {
         enabled: Boolean(rule.enabled),
         matcher: buildMatcher(String(rule.pattern)),
       }));
+  }
+
+  listRules(): IgnoreRuleSetting[] {
+    return this.db
+      .all<{
+        id: number;
+        category: string;
+        pattern: string;
+        reason: string;
+        enabled: number;
+      }>(
+        `SELECT id, category, pattern, reason, enabled
+         FROM ignore_rules
+         ORDER BY id ASC`,
+      )
+      .map((rule) => ({
+        id: Number(rule.id),
+        category: String(rule.category),
+        pattern: String(rule.pattern),
+        reason: String(rule.reason),
+        enabled: Boolean(rule.enabled),
+      }));
+  }
+
+  setCategoryEnabled(category: string, enabled: boolean): IgnoreRuleSetting[] {
+    this.db.run(
+      `UPDATE ignore_rules
+       SET enabled = ?
+       WHERE category = ?`,
+      [enabled ? 1 : 0, category],
+    );
+    this.initialize();
+
+    return this.listRules();
   }
 
   match(relativePath: string): string | null {

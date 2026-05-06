@@ -7,6 +7,7 @@ import type {
   SaveFolderPairInput,
   ScanResult,
   ScanSummary,
+  UpdateFolderPairSettingsInput,
 } from '../../shared/types';
 import { buildFolderSummaries, createEmptySummary, incrementSummary } from '../scanner/comparisonEngine';
 import type { DbRow, SqliteDatabase } from '../db/sqlite';
@@ -75,22 +76,52 @@ export class FolderPairService {
 
   saveFolderPair(input: SaveFolderPairInput): FolderPair {
     if (input.id) {
+      const existing = this.getFolderPair(input.id);
+      const mirrorNavigationEnabled = input.mirrorNavigationEnabled ?? existing.mirrorNavigationEnabled;
+      const reminderIntervalDays =
+        input.reminderIntervalDays === undefined ? existing.reminderIntervalDays : input.reminderIntervalDays;
+
       this.db.run(
         `UPDATE folder_pairs
-         SET name = ?, origin_path = ?, backup_path = ?, updated_at = CURRENT_TIMESTAMP
+         SET name = ?,
+             origin_path = ?,
+             backup_path = ?,
+             mirror_navigation_enabled = ?,
+             reminder_interval_days = ?,
+             updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [input.name, input.originPath, input.backupPath, input.id],
+        [input.name, input.originPath, input.backupPath, mirrorNavigationEnabled ? 1 : 0, reminderIntervalDays, input.id],
       );
       return this.getFolderPair(input.id);
     }
 
+    const mirrorNavigationEnabled = input.mirrorNavigationEnabled === false ? 0 : 1;
+    const reminderIntervalDays = input.reminderIntervalDays ?? null;
     const id = this.db.run(
-      `INSERT INTO folder_pairs (name, origin_path, backup_path)
-       VALUES (?, ?, ?)`,
-      [input.name, input.originPath, input.backupPath],
+      `INSERT INTO folder_pairs (name, origin_path, backup_path, mirror_navigation_enabled, reminder_interval_days)
+       VALUES (?, ?, ?, ?, ?)`,
+      [input.name, input.originPath, input.backupPath, mirrorNavigationEnabled, reminderIntervalDays],
     ).lastInsertRowid;
 
     return this.getFolderPair(id);
+  }
+
+  updateSettings(input: UpdateFolderPairSettingsInput): FolderPair {
+    const existing = this.getFolderPair(input.id);
+    this.db.run(
+      `UPDATE folder_pairs
+       SET mirror_navigation_enabled = ?,
+           reminder_interval_days = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        input.mirrorNavigationEnabled ?? existing.mirrorNavigationEnabled ? 1 : 0,
+        input.reminderIntervalDays === undefined ? existing.reminderIntervalDays : input.reminderIntervalDays,
+        input.id,
+      ],
+    );
+
+    return this.getFolderPair(input.id);
   }
 
   markScanned(folderPairId: number, scannedAt: string): void {
