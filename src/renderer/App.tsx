@@ -783,7 +783,9 @@ const App = () => {
     const savedTheme = window.localStorage.getItem('safetwin-theme');
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
-  const [filter, setFilter] = useState<FilterKey>('missing');
+  const [filter, setFilter] = useState<FilterKey>(() =>
+    window.localStorage.getItem('safetwin-view-filter') === 'missing' ? 'missing' : 'all',
+  );
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
   const [isScanning, setIsScanning] = useState(false);
@@ -1064,6 +1066,10 @@ const App = () => {
   useEffect(() => {
     window.localStorage.setItem('safetwin-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem('safetwin-view-filter', filter === 'missing' ? 'missing' : 'all');
+  }, [filter]);
 
   useEffect(() => {
     let canceled = false;
@@ -1588,15 +1594,7 @@ const App = () => {
     <section className="pane">
       <header className="pane-header">
         <div>
-          <strong>
-            {filter === 'missing' && side === 'origin'
-              ? 'MISSING FROM RECIPIENT'
-              : filter === 'missing' && side === 'backup'
-                ? 'RECIPIENT TARGET'
-                : side === 'origin'
-                  ? 'ORIGIN'
-                  : 'RECIPIENT'}
-          </strong>
+          <strong>{side === 'origin' ? 'ORIGIN' : 'RECIPIENT'}</strong>
           <span>{rootPath || `No ${side === 'origin' ? 'origin' : 'recipient'} folder selected`}</span>
         </div>
         <button type="button" title={`Choose ${side} folder`} onClick={() => chooseFolder(side)}>
@@ -1824,6 +1822,21 @@ const App = () => {
                 </button>
               </>
             ) : null}
+          </section>
+
+          <section className="side-section">
+            <h2>View</h2>
+            <label className="compact-field">
+              Show
+              <select
+                aria-label="Folder view"
+                value={filter === 'missing' ? 'missing' : 'all'}
+                onChange={(event) => setFilter(event.target.value === 'missing' ? 'missing' : 'all')}
+              >
+                <option value="all">Full folder tree</option>
+                <option value="missing">Missing only</option>
+              </select>
+            </label>
           </section>
 
           {showAdvancedControls ? (
