@@ -1242,6 +1242,17 @@ const App = () => {
     }
   };
 
+  const toggleCleanupMode = () => {
+    const nextCleanupMode = !cleanupMode;
+
+    setCleanupMode(nextCleanupMode);
+    setSelectionMode(nextCleanupMode);
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCopyPreview(null);
+    setCleanupPreview(null);
+  };
+
   const updatePairSettings = async (patch: { mirrorNavigationEnabled?: boolean; reminderIntervalDays?: number | null }) => {
     if (!activePairId) {
       return;
@@ -1665,13 +1676,7 @@ const App = () => {
             <button
               className={cleanupMode ? 'toolbar-active' : ''}
               type="button"
-              onClick={() => {
-                setCleanupMode((current) => !current);
-                setSelectionMode(true);
-                setSelectedPaths([]);
-                setSelectedFolderPaths([]);
-                setCleanupPreview(null);
-              }}
+              onClick={toggleCleanupMode}
             >
               <Trash2 size={16} aria-hidden="true" />
               Cleanup Mode
