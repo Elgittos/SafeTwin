@@ -2,7 +2,6 @@ import type { FolderPair, FolderSide, IgnoredFile, ScanMode, ScanProgressEvent, 
 import type { SqliteDatabase } from '../db/sqlite';
 import type { IgnoreRuleService } from '../ignore/ignoreRules';
 import { compareFiles } from './comparisonEngine';
-import type { ScannedFile } from './fileWalker';
 import { walkFiles } from './fileWalker';
 import { ScanRepository } from './scanRepository';
 
@@ -11,11 +10,6 @@ export type ScanProgressCallback = (event: ScanProgressEvent) => void;
 export interface ScanOptions {
   onProgress?: ScanProgressCallback;
 }
-
-const yieldToEventLoop = async (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 export class ScannerService {
   private readonly repository: ScanRepository;
@@ -69,7 +63,7 @@ export class ScannerService {
       }),
     ]);
 
-    emitProgress('caching', 'both', 'Writing scan cache', {
+    emitProgress('caching', 'both', 'Saving scan result', {
       filesDiscovered: originWalk.files.length + backupWalk.files.length,
       foldersDiscovered: originWalk.foldersDiscovered + backupWalk.foldersDiscovered,
       ignored: originWalk.ignoredFiles.length + backupWalk.ignoredFiles.length,
@@ -79,21 +73,7 @@ export class ScannerService {
     const ignoredFiles = [...originWalk.ignoredFiles, ...backupWalk.ignoredFiles];
     const skippedFiles = [...originWalk.skippedFiles, ...backupWalk.skippedFiles];
     const scannedFiles = [...originWalk.files, ...backupWalk.files, ...ignoredFiles, ...skippedFiles];
-    const entryIds = new Map<ScannedFile, number>();
-
-    for (const [index, file] of scannedFiles.entries()) {
-      entryIds.set(file, this.repository.insertFileEntry(scanRunId, file));
-
-      if (index > 0 && index % 250 === 0) {
-        emitProgress('caching', 'both', `Writing scan cache: ${index}/${scannedFiles.length} entries`, {
-          filesDiscovered: index,
-          foldersDiscovered: originWalk.foldersDiscovered + backupWalk.foldersDiscovered,
-          ignored: ignoredFiles.length,
-          skipped: skippedFiles.length,
-        });
-        await yieldToEventLoop();
-      }
-    }
+    const entryIds = this.repository.insertFileEntries(scanRunId, scannedFiles);
 
     emitProgress('comparing', 'both', 'Comparing folders', {
       filesDiscovered: originWalk.files.length + backupWalk.files.length,
@@ -110,27 +90,7 @@ export class ScannerService {
     });
 
     const scannedByAbsolutePath = new Map(scannedFiles.map((file) => [file.absolutePath, file]));
-
-    for (const [index, item] of comparison.files.entries()) {
-      const origin = item.originPath ? scannedByAbsolutePath.get(item.originPath) ?? null : null;
-      const backup = item.backupPath ? scannedByAbsolutePath.get(item.backupPath) ?? null : null;
-      this.repository.insertCompareResult(
-        scanRunId,
-        item,
-        origin ? entryIds.get(origin) ?? null : null,
-        backup ? entryIds.get(backup) ?? null : null,
-      );
-
-      if (index > 0 && index % 250 === 0) {
-        emitProgress('comparing', 'both', `Saving comparison: ${index}/${comparison.files.length} results`, {
-          filesDiscovered: index,
-          foldersDiscovered: originWalk.foldersDiscovered + backupWalk.foldersDiscovered,
-          ignored: ignoredFiles.length,
-          skipped: skippedFiles.length,
-        });
-        await yieldToEventLoop();
-      }
-    }
+    this.repository.insertCompareResults(scanRunId, comparison.files, entryIds, scannedByAbsolutePath);
 
     const result: ScanResult = {
       scanRunId,

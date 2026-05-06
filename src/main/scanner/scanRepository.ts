@@ -5,6 +5,19 @@ import type { ScannedFile } from './fileWalker';
 export class ScanRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
+  private runInTransaction<T>(work: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE;');
+
+    try {
+      const result = work();
+      this.db.exec('COMMIT;');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK;');
+      throw error;
+    }
+  }
+
   createScanRun(folderPairId: number, mode: ScanMode, startedAt: string): number {
     return this.db.run(
       `INSERT INTO scan_runs (folder_pair_id, mode, started_at)
@@ -38,6 +51,18 @@ export class ScanRepository {
     ).lastInsertRowid;
   }
 
+  insertFileEntries(scanRunId: number, files: ScannedFile[]): Map<ScannedFile, number> {
+    return this.runInTransaction(() => {
+      const entryIds = new Map<ScannedFile, number>();
+
+      for (const file of files) {
+        entryIds.set(file, this.insertFileEntry(scanRunId, file));
+      }
+
+      return entryIds;
+    });
+  }
+
   insertCompareResult(
     scanRunId: number,
     item: FileCompareItem,
@@ -51,6 +76,26 @@ export class ScanRepository {
       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [scanRunId, item.relativePath, item.state, originEntryId, backupEntryId, item.sizeBytes, item.reason],
     );
+  }
+
+  insertCompareResults(
+    scanRunId: number,
+    items: FileCompareItem[],
+    entryIds: Map<ScannedFile, number>,
+    scannedByAbsolutePath: Map<string, ScannedFile>,
+  ): void {
+    this.runInTransaction(() => {
+      for (const item of items) {
+        const origin = item.originPath ? scannedByAbsolutePath.get(item.originPath) ?? null : null;
+        const backup = item.backupPath ? scannedByAbsolutePath.get(item.backupPath) ?? null : null;
+        this.insertCompareResult(
+          scanRunId,
+          item,
+          origin ? entryIds.get(origin) ?? null : null,
+          backup ? entryIds.get(backup) ?? null : null,
+        );
+      }
+    });
   }
 
   completeScanRun(result: ScanResult, totalOriginFiles: number, totalBackupFiles: number): void {
