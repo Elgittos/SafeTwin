@@ -8,11 +8,28 @@ if (started) {
   app.quit();
 }
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.exit(0);
+}
+
 app.setName('SafeTwin');
 
+let mainWindow: BrowserWindow | null = null;
+
 const createWindow = () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+
+    mainWindow.focus();
+    return;
+  }
+
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1180,
     height: 780,
     minWidth: 980,
@@ -37,7 +54,23 @@ const createWindow = () => {
   if (!app.isPackaged && process.env.SAFETWIN_DEVTOOLS === '1') {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 };
+
+app.on('second-instance', () => {
+  if (!mainWindow) {
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.focus();
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
