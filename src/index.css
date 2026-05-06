@@ -661,7 +661,7 @@ select {
 
 .explorer-row {
   display: grid;
-  grid-template-columns: 22px 22px minmax(70px, 1fr) 62px minmax(44px, auto) 72px;
+  grid-template-columns: 22px 22px minmax(70px, 1fr) 110px minmax(44px, auto) 72px;
   align-items: center;
   gap: 6px;
   width: 100%;
@@ -718,7 +718,7 @@ select {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  width: 56px;
+  width: 104px;
   height: 24px;
   padding: 0;
   border: 1px solid transparent;

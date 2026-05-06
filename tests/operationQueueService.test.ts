@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initializeSchema } from '../src/main/db/schema';
 import { openDatabase } from '../src/main/db/sqlite';
 import { IgnoreRuleService } from '../src/main/ignore/ignoreRules';
@@ -182,7 +182,7 @@ describe('OperationQueueService', () => {
   });
 
   it('copies one visible missing file without requiring a scan cache', async () => {
-    const { root, db, folderPairs, operations } = await setupServices();
+    const { root, db, folderPairs, scanner, operations } = await setupServices();
     const originPath = path.join(root, 'origin');
     const backupPath = path.join(root, 'backup');
     const mtime = new Date('2026-05-06T12:00:00.000Z');
@@ -195,6 +195,7 @@ describe('OperationQueueService', () => {
         originPath,
         backupPath,
       });
+      const scanSpy = vi.spyOn(scanner, 'scanPair');
       const copyOperation = await operations.createSingleCopyOperation({
         folderPairId: pair.id,
         relativePath: 'single.txt',
@@ -208,6 +209,7 @@ describe('OperationQueueService', () => {
       expect(completed.operation.state).toBe('completed');
       expect(completed.items).toHaveLength(1);
       expect(completed.items[0].action).toBe('copyMissing');
+      expect(scanSpy).not.toHaveBeenCalled();
       await expect(fs.readFile(path.join(backupPath, 'single.txt'), 'utf8')).resolves.toBe('single visible file');
     } finally {
       db.close();

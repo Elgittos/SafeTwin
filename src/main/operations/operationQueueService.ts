@@ -384,9 +384,13 @@ export class OperationQueueService {
         try {
           const completedAt = new Date().toISOString();
           this.folderPairs.markOperationAt(snapshot.operation.folderPairId, completedAt);
-          const pair = this.folderPairs.getFolderPair(snapshot.operation.folderPairId);
-          const scanResult = await this.scanner.scanPair(pair);
-          this.folderPairs.markScanned(pair.id, scanResult.completedAt);
+
+          if (snapshot.operation.type === 'cleanup') {
+            const pair = this.folderPairs.getFolderPair(snapshot.operation.folderPairId);
+            const scanResult = await this.scanner.scanPair(pair);
+            this.folderPairs.markScanned(pair.id, scanResult.completedAt);
+          }
+
           this.repository.updateOperationState(operationId, 'completed');
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Refresh scan failed after operation.';

@@ -1580,6 +1580,16 @@ const App = () => {
                 ? 'copyMissing'
                 : null;
           const copyPath = copyAction ? row.relativePath : null;
+          const activeCopyItem = copyPath ? operationByPath.get(normalizePath(copyPath).toLowerCase()) ?? null : null;
+          const copyDisabledByOperation = activeCopyItem
+            ? !['failed', 'cancelled'].includes(activeCopyItem.state)
+            : false;
+          const copyButtonLabel =
+            copyAction === 'copyConflictDuplicate'
+              ? 'Copy duplicate'
+              : side === 'backup'
+                ? 'Copy here'
+                : 'Copy to backup';
           const rowClasses = ['explorer-row'];
 
           if (selected || folderSelected) {
@@ -1666,14 +1676,18 @@ const App = () => {
                   <button
                     type="button"
                     title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Backup' : 'Copy this Origin file to Backup'}
-                    disabled={isPreparingOperation}
+                    disabled={isPreparingOperation || copyDisabledByOperation}
                     onClick={(event) => {
                       event.stopPropagation();
                       void createSingleCopyQueue(copyPath, copyAction);
                     }}
                   >
                     <Copy size={13} aria-hidden="true" />
-                    Copy
+                    {activeCopyItem?.state === 'completed'
+                      ? 'Copied'
+                      : activeCopyItem && ['pending', 'running', 'paused'].includes(activeCopyItem.state)
+                        ? 'Copying'
+                        : copyButtonLabel}
                   </button>
                 ) : null}
               </span>
