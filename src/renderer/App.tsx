@@ -271,6 +271,9 @@ const samplesTitle = (label: string, count: number, samples?: string[] | null): 
   return `${label}: ${count}\nExamples:\n${samples.join('\n')}`;
 };
 
+const plural = (count: number, singular: string, pluralWord = `${singular}s`): string =>
+  `${count} ${count === 1 ? singular : pluralWord}`;
+
 const progressPercent = (done: number, total: number): number => (total > 0 ? Math.round((done / total) * 100) : 0);
 
 const createLiveCompareItem = (
@@ -619,10 +622,14 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
         {row.counts.missingInBackup > 0 && side === 'origin' ? (
           <span
             className="badge badge-plus"
-            title={samplesTitle('Ready to copy', row.counts.missingInBackup, row.samples?.missingInBackup)}
+            title={samplesTitle(
+              `Origin-only files inside this folder`,
+              row.counts.missingInBackup,
+              row.samples?.missingInBackup,
+            )}
           >
             <Plus size={12} aria-hidden="true" />
-            {row.counts.missingInBackup} missing
+            {plural(row.counts.missingInBackup, 'file')}
           </span>
         ) : null}
         {row.counts.backupOnly > 0 && side === 'backup' ? (
