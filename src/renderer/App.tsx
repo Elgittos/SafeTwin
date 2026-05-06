@@ -1242,6 +1242,16 @@ const App = () => {
     }
   };
 
+  const openDeleteExtras = () => {
+    setCleanupMode(true);
+    setSelectionMode(true);
+    setFilter('backupOnly');
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCopyPreview(null);
+    setCleanupPreview(null);
+  };
+
   const updatePairSettings = async (patch: { mirrorNavigationEnabled?: boolean; reminderIntervalDays?: number | null }) => {
     if (!activePairId) {
       return;
@@ -1663,18 +1673,13 @@ const App = () => {
               Select
             </button>
             <button
-              className={cleanupMode ? 'toolbar-active' : ''}
+              className={cleanupMode ? 'toolbar-active danger-action' : 'danger-action'}
               type="button"
-              onClick={() => {
-                setCleanupMode((current) => !current);
-                setSelectionMode(true);
-                setSelectedPaths([]);
-                setSelectedFolderPaths([]);
-                setCleanupPreview(null);
-              }}
+              disabled={!activePairId || !backupPath}
+              onClick={openDeleteExtras}
             >
               <Trash2 size={16} aria-hidden="true" />
-              Cleanup Mode
+              Delete Extras
             </button>
             <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
               <Settings size={16} aria-hidden="true" />
@@ -1743,11 +1748,14 @@ const App = () => {
             </button>
             {cleanupMode ? (
               <>
+                <button type="button" onClick={selectVisibleEligible}>
+                  Select visible extras
+                </button>
                 <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
-                  Cleanup preview
+                  Preview delete
                 </button>
                 <button type="button" disabled={!cleanupPreview || cleanupPreview.filesSelected === 0} onClick={createCleanupQueue}>
-                  Cleanup selected
+                  Move to Recycle Bin
                 </button>
               </>
             ) : null}

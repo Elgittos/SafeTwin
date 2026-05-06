@@ -291,6 +291,24 @@ select {
   background: #1f7a5f;
 }
 
+.side-menu .danger-action {
+  color: #8a2f2f;
+  border-color: #f0b6b6;
+  background: #fff1f1;
+}
+
+.theme-dark .side-menu .danger-action {
+  color: #ffd0d0;
+  border-color: #683238;
+  background: #331a20;
+}
+
+.side-menu .danger-action.toolbar-active {
+  color: #ffffff;
+  border-color: #b42323;
+  background: #b42323;
+}
+
 .mirror-toggle {
   display: inline-flex;
   align-items: center;
