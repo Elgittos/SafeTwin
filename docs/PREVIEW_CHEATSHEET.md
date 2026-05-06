@@ -1,65 +1,52 @@
-# SafeTwin Preview Cheat Sheet
+# SafeTwin Preview Commands Cheat Sheet
 
-## First Time Setup
+Run these from the project folder:
 
 ```powershell
-npm.cmd install
+cd C:\Users\LuisDev\Desktop\SafeTwin
 ```
 
-## Start the Live Preview
+## Fastest Preview
+
+Use this while building and testing UI changes:
 
 ```powershell
 npm.cmd start
 ```
 
-This opens the Electron app with Vite hot reload.
+This opens SafeTwin in Electron with Vite live reload.
 
-## Useful Verification Commands
+## First Time Setup
 
-```powershell
-npm.cmd run typecheck
-npm.cmd test
-npm.cmd run lint
-npm.cmd run package
-```
-
-## Packaged Preview
+Run this once after cloning the project or after dependencies change:
 
 ```powershell
-npm.cmd run package
-.\out\SafeTwin-win32-x64\SafeTwin.exe
+npm.cmd install
 ```
 
-## Suggested Manual Test
+## Create Test Folders
 
-Create `C:\SafeTwinTest\Origin` and `C:\SafeTwinTest\Backup`, put a few files in Origin, a few backup-only files in Backup, and one file with the same relative path but different content. Run Scan, try mirrored navigation, use filters, create a copy queue, and test cleanup with disposable files only.
-
-## Fast Smoke Test Folder Setup
+Use disposable folders before testing real backups:
 
 ```powershell
 npm.cmd run smoke:setup
 ```
 
-This creates `C:\SafeTwinTest\Origin` and `C:\SafeTwinTest\Backup`.
+This creates:
 
-Manual equivalent:
-
-```powershell
-$origin = "C:\SafeTwinTest\Origin"
-$backup = "C:\SafeTwinTest\Backup"
-Remove-Item "C:\SafeTwinTest" -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $origin, $backup, "$origin\Photos", "$backup\Photos" | Out-Null
-"only origin" | Set-Content "$origin\Photos\cat.jpg"
-"only backup" | Set-Content "$backup\orphan.txt"
-"same" | Set-Content "$origin\same.txt"
-"same" | Set-Content "$backup\same.txt"
-"origin version" | Set-Content "$origin\Photos\conflict.txt"
-"backup version" | Set-Content "$backup\Photos\conflict.txt"
-"temp" | Set-Content (Join-Path $origin '~$report.docx')
-"partial" | Set-Content (Join-Path $origin 'video.mp4.part')
+```text
+C:\SafeTwinTest\Origin
+C:\SafeTwinTest\Backup
 ```
 
-Expected after Scan:
+In SafeTwin, select:
+
+```text
+Origin: C:\SafeTwinTest\Origin
+Backup: C:\SafeTwinTest\Backup
+```
+
+Expected scan results:
 
 - `Photos/cat.jpg` shows green `+`
 - `orphan.txt` shows red `-`
@@ -67,4 +54,79 @@ Expected after Scan:
 - `Photos/conflict.txt` shows yellow warning
 - `~$report.docx` and `video.mp4.part` show as ignored
 
-Use these smoke-test folders only for first copy and cleanup tests.
+## Packaged Preview
+
+Build the local packaged app:
+
+```powershell
+npm.cmd run package
+```
+
+Run the packaged app:
+
+```powershell
+.\out\SafeTwin-win32-x64\SafeTwin.exe
+```
+
+If PowerShell does not launch it, use:
+
+```powershell
+Start-Process .\out\SafeTwin-win32-x64\SafeTwin.exe
+```
+
+## Build Installer
+
+Create the one-click Windows installer:
+
+```powershell
+npm.cmd run make
+```
+
+Installer output:
+
+```text
+out\make\squirrel.windows\x64\SafeTwinSetup.exe
+```
+
+## Quick Quality Checks
+
+Run these before committing bigger changes:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run lint
+```
+
+## Full Preview Build Check
+
+Use this when you want to verify everything end to end:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run lint
+npm.cmd run package
+npm.cmd run make
+```
+
+## Relaunch Cleanly
+
+If SafeTwin is already open and you want to restart the packaged preview:
+
+```powershell
+Get-Process SafeTwin -ErrorAction SilentlyContinue | Stop-Process
+Start-Process .\out\SafeTwin-win32-x64\SafeTwin.exe
+```
+
+## Real Folder Test
+
+After the smoke folders work, use your real pair:
+
+1. Open SafeTwin.
+2. Add or select your Origin folder.
+3. Add or select your Backup folder.
+4. Click Scan.
+5. Watch the scan progress banner.
+6. Review missing, backup-only, conflict, ignored, and skipped files.
+7. Copy or clean only after the preview scan looks right.

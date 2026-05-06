@@ -18,4 +18,6 @@ Phase 3 adds the Windows Explorer-style UI: two-pane Origin and Backup navigatio
 
 Phase 4 packages SafeTwin as a personal Windows app with app metadata, icon, installer/build output, persistent folder pairs, SQLite cache, operation logs, startup recovery, scan progress feedback, and a disposable-folder smoke test.
 
-See [SafeTwin Preview Cheat Sheet](docs/PREVIEW_CHEATSHEET.md) for local preview commands.
+## Preview Commands
+
+Use [SafeTwin Preview Commands Cheat Sheet](docs/PREVIEW_CHEATSHEET.md) for copy-paste commands to start the live preview, create smoke-test folders, run the packaged preview, and build the Windows installer.
