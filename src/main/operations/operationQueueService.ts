@@ -34,6 +34,8 @@ const normalizeRelativePath = (relativePath: string): string => relativePath.rep
 
 const toSafeRelativePath = (relativePath: string): string => relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
 
+const metadataTimeToleranceMs = 2_000;
+
 const resolveInsideRoot = (rootPath: string, relativePath: string): string => {
   const resolvedRoot = path.resolve(rootPath);
   const resolvedPath = path.resolve(resolvedRoot, relativePath);
@@ -78,13 +80,53 @@ const getItemFailureMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : 'Operation item failed.';
 };
 
+const isMissingPathError = (error: unknown): boolean =>
+  error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+const fileMetadataMatches = (left: { size: number; mtimeMs: number }, right: { size: number; mtimeMs: number }): boolean =>
+  left.size === right.size && Math.abs(left.mtimeMs - right.mtimeMs) <= metadataTimeToleranceMs;
+
+const destinationStatusForMissingCopy = async (
+  sourcePath: string,
+  destinationPath: string,
+): Promise<'missing' | 'alreadyBackedUp' | 'differentFileExists'> => {
+  let sourceStats;
+  let destinationStats;
+
+  try {
+    sourceStats = await fsp.stat(sourcePath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return 'differentFileExists';
+    }
+
+    throw error;
+  }
+
+  try {
+    destinationStats = await fsp.stat(destinationPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return 'missing';
+    }
+
+    throw error;
+  }
+
+  if (!destinationStats.isFile()) {
+    return 'differentFileExists';
+  }
+
+  return fileMetadataMatches(sourceStats, destinationStats) ? 'alreadyBackedUp' : 'differentFileExists';
+};
+
 export class OperationQueueService {
   private readonly repository: OperationRepository;
   private readonly copyService = new FileCopyService();
   private readonly controllers = new Map<number, QueueController>();
 
   constructor(
-    db: SqliteDatabase,
+    private readonly db: SqliteDatabase,
     private readonly folderPairs: FolderPairService,
     private readonly scanner: ScannerService,
     private readonly logger: OperationLogger,
@@ -101,17 +143,26 @@ export class OperationQueueService {
       throw new Error('Run a scan before creating a copy operation.');
     }
 
+    const includeConflictsAsDuplicates = input.includeConflictsAsDuplicates ?? true;
     const candidates = filterSelectedFiles(
       status.lastScan.files,
       input.selectedRelativePaths,
       input.selectedFolderPaths ?? [],
-    ).filter((file) => file.state === 'missingInBackup' || file.state === 'conflictSamePathDifferentContent');
+    ).filter(
+      (file) =>
+        file.state === 'missingInBackup' ||
+        (includeConflictsAsDuplicates && file.state === 'conflictSamePathDifferentContent'),
+    );
 
     if (candidates.length === 0) {
-      throw new Error('Select missing or conflict files before creating a copy operation.');
+      throw new Error(
+        includeConflictsAsDuplicates
+          ? 'Select missing or conflict files before creating a backup operation.'
+          : 'Select missing files before creating a backup operation.',
+      );
     }
 
-    const operation = this.repository.createOperation(pair.id, 'copy');
+    const items: NewOperationItem[] = [];
 
     for (const file of candidates) {
       if (!file.originPath) {
@@ -123,8 +174,16 @@ export class OperationQueueService {
         action === 'copyMissing'
           ? path.join(pair.backupPath, file.relativePath)
           : await createAvailableConflictDuplicatePath(file.backupPath ?? path.join(pair.backupPath, file.relativePath));
+      if (action === 'copyMissing') {
+        const destinationStatus = await destinationStatusForMissingCopy(file.originPath, destinationPath);
+
+        if (destinationStatus !== 'missing') {
+          continue;
+        }
+      }
+
       const verificationLevel = input.verificationLevel ?? (status.lastScan.mode === 'deep' ? 'strong' : 'auto');
-      const item: NewOperationItem = {
+      items.push({
         action,
         relativePath: file.relativePath,
         sourcePath: file.originPath,
@@ -132,8 +191,16 @@ export class OperationQueueService {
         tempPath: getTempCopyPath(destinationPath),
         bytesTotal: file.sizeBytes,
         verificationLevel,
-      };
+      });
+    }
 
+    if (items.length === 0) {
+      throw new Error('Selected files are already present in Recipient or are no longer missing. Run Scan only to refresh.');
+    }
+
+    const operation = this.repository.createOperation(pair.id, 'copy');
+
+    for (const item of items) {
       this.repository.createOperationItem(operation.id, item);
     }
 
@@ -158,6 +225,19 @@ export class OperationQueueService {
 
     const destinationPath =
       input.action === 'copyMissing' ? backupPath : await createAvailableConflictDuplicatePath(backupPath);
+
+    if (input.action === 'copyMissing') {
+      const destinationStatus = await destinationStatusForMissingCopy(sourcePath, destinationPath);
+
+      if (destinationStatus === 'alreadyBackedUp') {
+        throw new Error('This file is already present in Recipient. Run Scan only to refresh the list.');
+      }
+
+      if (destinationStatus === 'differentFileExists') {
+        throw new Error('Recipient already has a different file at this path. Use the duplicate conflict action instead.');
+      }
+    }
+
     const operation = this.repository.createOperation(pair.id, 'copy');
 
     this.repository.createOperationItem(operation.id, {
@@ -389,6 +469,8 @@ export class OperationQueueService {
             const pair = this.folderPairs.getFolderPair(snapshot.operation.folderPairId);
             const scanResult = await this.scanner.scanPair(pair);
             this.folderPairs.markScanned(pair.id, scanResult.completedAt);
+          } else {
+            this.markCopiedMissingItemsBackedUp(snapshot);
           }
 
           this.repository.updateOperationState(operationId, 'completed');
@@ -477,6 +559,37 @@ export class OperationQueueService {
       verification: 'sizeVerified',
       completedAt: new Date().toISOString(),
     });
+  }
+
+  private markCopiedMissingItemsBackedUp(snapshot: OperationSnapshot): void {
+    const scanRun = this.db.get<{ id: number }>(
+      `SELECT id
+       FROM scan_runs
+       WHERE folder_pair_id = ? AND completed_at IS NOT NULL
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [snapshot.operation.folderPairId],
+    );
+
+    if (!scanRun) {
+      return;
+    }
+
+    for (const item of snapshot.items) {
+      if (item.action !== 'copyMissing' || item.state !== 'completed') {
+        continue;
+      }
+
+      this.db.run(
+        `UPDATE compare_results
+         SET state = 'identical',
+             reason = 'Backed up to Recipient'
+         WHERE scan_run_id = ?
+           AND relative_path = ?
+           AND state = 'missingInBackup'`,
+        [Number(scanRun.id), item.relativePath],
+      );
+    }
   }
 
   private resolveFinalState(snapshot: OperationSnapshot): OperationState {

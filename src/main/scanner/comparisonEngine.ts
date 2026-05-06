@@ -72,12 +72,14 @@ export const incrementSummary = (summary: ScanSummary, state: FileCompareState, 
   }
 };
 
+const metadataTimeToleranceMs = 2_000;
+
 const fileContentMatches = (origin: ScannedFile, backup: ScannedFile): boolean => {
   if (origin.hash && backup.hash) {
     return origin.hash === backup.hash;
   }
 
-  return origin.size === backup.size && origin.mtimeMs === backup.mtimeMs;
+  return origin.size === backup.size && Math.abs(origin.mtimeMs - backup.mtimeMs) <= metadataTimeToleranceMs;
 };
 
 const mapSkippedState = (file: ScannedFile): FileCompareState => {

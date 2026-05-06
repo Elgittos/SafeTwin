@@ -122,6 +122,10 @@ describe('OperationQueueService', () => {
       expect(completed.items.every((item) => item.verificationState === 'hashVerified')).toBe(true);
       expect(scanSpy).not.toHaveBeenCalled();
       await expect(fs.readFile(path.join(pair.backupPath, 'missing.txt'), 'utf8')).resolves.toBe('missing');
+      expect(folderPairs.getLastStatus(pair.id).lastScan?.summary.missingInBackup).toBe(0);
+      expect(
+        folderPairs.getLastStatus(pair.id).lastScan?.files.find((item) => item.relativePath === 'missing.txt')?.state,
+      ).toBe('identical');
 
       const conflictDestination = completed.items.find((item) => item.action === 'copyConflictDuplicate')?.destinationPath;
       expect(conflictDestination).toContain('origin copy');
@@ -234,6 +238,49 @@ describe('OperationQueueService', () => {
         'copyConflictDuplicate',
         'copyMissing',
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not create a backup operation when cached missing files are already present', async () => {
+    const { root, db, folderPairs, scanner, operations } = await setupServices();
+
+    try {
+      const pair = await createScannedPair(folderPairs, scanner, root);
+      await writeFile(
+        path.join(pair.backupPath, 'missing.txt'),
+        'missing',
+        new Date('2026-05-06T12:00:01.000Z'),
+      );
+
+      await expect(
+        operations.createCopyOperation({
+          folderPairId: pair.id,
+          selectedRelativePaths: ['missing.txt'],
+          includeConflictsAsDuplicates: false,
+          verificationLevel: 'basic',
+        }),
+      ).rejects.toThrow('already present in Recipient');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps conflict duplicates out of normal missing-file backup operations', async () => {
+    const { root, db, folderPairs, scanner, operations } = await setupServices();
+
+    try {
+      const pair = await createScannedPair(folderPairs, scanner, root);
+      const copyOperation = await operations.createCopyOperation({
+        folderPairId: pair.id,
+        selectedRelativePaths: [],
+        selectedFolderPaths: [''],
+        includeConflictsAsDuplicates: false,
+        verificationLevel: 'basic',
+      });
+
+      expect(copyOperation.items.map((item) => item.action)).toEqual(['copyMissing']);
     } finally {
       db.close();
     }

@@ -123,4 +123,24 @@ describe('compareFiles', () => {
     expect(result.files[0].state).toBe('conflictSamePathDifferentContent');
     expect(result.files[0].reason).toBe('Same relative path with different hash');
   });
+
+  it('treats same-size files with normal filesystem timestamp rounding as identical', () => {
+    const result = compareFiles({
+      originFiles: [file({ relativePath: 'copied.jpg', normalizedKey: 'copied.jpg', size: 10, mtimeMs: 10_000 })],
+      backupFiles: [
+        file({
+          side: 'backup',
+          relativePath: 'copied.jpg',
+          absolutePath: 'D:\\backup\\copied.jpg',
+          normalizedKey: 'copied.jpg',
+          size: 10,
+          mtimeMs: 11_500,
+        }),
+      ],
+      ignoredFiles: [],
+      skippedFiles: [],
+    });
+
+    expect(result.files[0].state).toBe('identical');
+  });
 });

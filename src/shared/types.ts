@@ -196,6 +196,7 @@ export interface CreateCopyOperationInput {
   selectedRelativePaths: string[];
   selectedFolderPaths?: string[];
   verificationLevel?: VerificationLevel;
+  includeConflictsAsDuplicates?: boolean;
 }
 
 export interface CreateSingleCopyOperationInput {

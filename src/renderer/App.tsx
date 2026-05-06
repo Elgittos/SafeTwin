@@ -207,6 +207,8 @@ const toFriendlyError = (error: unknown, fallback: string): string => {
 const normalizePath = (relativePath: string): string =>
   relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
 
+const metadataTimeToleranceMs = 2_000;
+
 const parentPath = (relativePath: string): string => {
   const normalized = normalizePath(relativePath);
   const slashIndex = normalized.lastIndexOf('/');
@@ -298,7 +300,9 @@ const createLiveCompareItem = (
     };
   }
 
-  const matches = entry.sizeBytes === oppositeFile.sizeBytes && entry.mtimeMs === oppositeFile.mtimeMs;
+  const matches =
+    entry.sizeBytes === oppositeFile.sizeBytes &&
+    Math.abs(entry.mtimeMs - oppositeFile.mtimeMs) <= metadataTimeToleranceMs;
 
   return {
     relativePath,
@@ -598,6 +602,8 @@ const buildPaneRows = (
 
 const canCopy = (file: FileCompareItem): boolean =>
   file.state === 'missingInBackup' || file.state === 'conflictSamePathDifferentContent';
+
+const canBackUpMissing = (file: FileCompareItem): boolean => file.state === 'missingInBackup';
 
 const canCleanup = (file: FileCompareItem): boolean => file.state === 'backupOnly';
 
@@ -1313,7 +1319,7 @@ const App = () => {
 
   const rowIsSelectable = (row: PaneRow): boolean => {
     if (row.kind === 'file') {
-      return cleanupMode ? canCleanup(row.file) : canCopy(row.file);
+      return cleanupMode ? canCleanup(row.file) : canBackUpMissing(row.file);
     }
 
     if (row.kind !== 'folder') {
@@ -1324,7 +1330,7 @@ const App = () => {
       return row.side === 'backup' && row.counts.backupOnly > 0;
     }
 
-    return row.side === 'origin' && (row.counts.missingInBackup > 0 || row.counts.conflicts > 0);
+    return row.side === 'origin' && row.counts.missingInBackup > 0;
   };
 
   const selectVisibleEligible = () => {
@@ -1372,7 +1378,12 @@ const App = () => {
     await scanSavedPair(savedPair);
   };
 
-  const startCopyOperation = async (folderPairId: number, paths: string[], folderPaths: string[]) => {
+  const startCopyOperation = async (
+    folderPairId: number,
+    paths: string[],
+    folderPaths: string[],
+    includeConflictsAsDuplicates = false,
+  ) => {
     setIsPreparingOperation(true);
     setError(null);
 
@@ -1382,6 +1393,7 @@ const App = () => {
         selectedRelativePaths: paths,
         selectedFolderPaths: folderPaths,
         verificationLevel,
+        includeConflictsAsDuplicates,
       });
       const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
       setOperation(startedOperation);
@@ -1389,11 +1401,17 @@ const App = () => {
         startedOperation,
         ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
       ]);
-      setCopyPreview({
-        filesSelected: nextOperation.totals.totalItems,
-        conflictsSelected: nextOperation.items.filter((item) => item.action === 'copyConflictDuplicate').length,
-        totalSize: nextOperation.totals.bytesTotal,
-      });
+      if (startedOperation.operation.state === 'failed') {
+        const firstError = startedOperation.items.find((item) => item.state === 'failed')?.errorMessage;
+        setError(firstError ?? 'Backup failed.');
+        setCopyPreview(null);
+      } else {
+        setCopyPreview({
+          filesSelected: nextOperation.totals.totalItems,
+          conflictsSelected: nextOperation.items.filter((item) => item.action === 'copyConflictDuplicate').length,
+          totalSize: nextOperation.totals.bytesTotal,
+        });
+      }
       setCleanupMode(false);
       setCleanupPreview(null);
     } catch (operationError) {
@@ -1403,7 +1421,11 @@ const App = () => {
     }
   };
 
-  const createCopyQueue = async (paths: string[], folderPaths: string[] = []) => {
+  const createCopyQueue = async (
+    paths: string[],
+    folderPaths: string[] = [],
+    includeConflictsAsDuplicates = false,
+  ) => {
     if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
       return;
     }
@@ -1413,7 +1435,7 @@ const App = () => {
       return;
     }
 
-    await startCopyOperation(activePairId, paths, folderPaths);
+    await startCopyOperation(activePairId, paths, folderPaths, includeConflictsAsDuplicates);
   };
 
   const createSingleCopyQueue = async (relativePath: string, action: CopyAction) => {
@@ -1437,11 +1459,17 @@ const App = () => {
         startedOperation,
         ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
       ]);
-      setCopyPreview({
-        filesSelected: 1,
-        conflictsSelected: action === 'copyConflictDuplicate' ? 1 : 0,
-        totalSize: nextOperation.totals.bytesTotal,
-      });
+      if (startedOperation.operation.state === 'failed') {
+        const firstError = startedOperation.items.find((item) => item.state === 'failed')?.errorMessage;
+        setError(firstError ?? 'Backup failed.');
+        setCopyPreview(null);
+      } else {
+        setCopyPreview({
+          filesSelected: 1,
+          conflictsSelected: action === 'copyConflictDuplicate' ? 1 : 0,
+          totalSize: nextOperation.totals.bytesTotal,
+        });
+      }
       setCleanupMode(false);
       setCleanupPreview(null);
     } catch (operationError) {
@@ -1552,7 +1580,7 @@ const App = () => {
     }
 
     if (action === 'copyConflicts') {
-      void createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath));
+      void createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath), [], true);
     }
   };
 
@@ -1851,7 +1879,7 @@ const App = () => {
               Back up selected missing files
             </button>
             <button type="button" onClick={selectVisibleEligible}>
-              {cleanupMode ? 'Select visible cleanup items' : 'Select visible missing/conflicts'}
+              {cleanupMode ? 'Select visible cleanup items' : 'Select visible missing files'}
             </button>
             <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
               Clear
@@ -1949,11 +1977,11 @@ const App = () => {
 
       {copyPreview ? (
         <section className="operation-preview">
-          <strong>Backup preview</strong>
-          <span>Files selected: {copyPreview.filesSelected}</span>
+          <strong>Backup queued</strong>
+          <span>Files in queue: {copyPreview.filesSelected}</span>
           {showAdvancedControls ? <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span> : null}
           <span>Total size: {formatBytes(copyPreview.totalSize)}</span>
-          <span>Action: back up selected missing Origin files to Recipient; existing Recipient files stay preserved</span>
+          <span>Action: backing up selected missing Origin files to Recipient; existing Recipient files stay preserved</span>
         </section>
       ) : null}
 
