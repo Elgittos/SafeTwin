@@ -22,6 +22,7 @@ import {
   Moon,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -115,7 +116,16 @@ interface PreviewFileRow {
   sizeBytes: number;
 }
 
-type PaneRow = ParentRow | FolderRow | FileRow | PreviewFolderRow | PreviewFileRow;
+interface MissingPlaceholderRow {
+  kind: 'missingPlaceholder';
+  side: PaneSide;
+  relativePath: string;
+  name: string;
+  displayPath: string;
+  sizeBytes: number;
+}
+
+type PaneRow = ParentRow | FolderRow | FileRow | PreviewFolderRow | PreviewFileRow | MissingPlaceholderRow;
 
 const emptySummary = (): ScanSummary => ({
   missingInBackup: 0,
@@ -351,6 +361,10 @@ const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>
     return true;
   }
 
+  if (row.kind === 'missingPlaceholder') {
+    return filter === 'missing';
+  }
+
   if (row.kind === 'previewFolder') {
     return filter === 'missing';
   }
@@ -418,9 +432,23 @@ const matchesSearch = (row: PaneRow, query: string): boolean => {
       ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} ${stateLabel(row.file)} ${row.file.reason}`
       : row.kind === 'previewFile'
         ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} file`
-      : `${row.name} ${row.displayPath} missing backup-only conflict ignored skipped folder`;
+        : row.kind === 'missingPlaceholder'
+          ? `${row.name} ${row.displayPath} missing in backup`
+          : `${row.name} ${row.displayPath} missing backup-only conflict ignored skipped folder`;
 
   return corpus.toLowerCase().includes(trimmed);
+};
+
+const rowSortWeight = (row: PaneRow): number => {
+  if (row.kind === 'parent') {
+    return 0;
+  }
+
+  if (row.kind === 'folder' || row.kind === 'previewFolder') {
+    return 1;
+  }
+
+  return 2;
 };
 
 const buildPaneRows = (
@@ -462,6 +490,7 @@ const buildPaneRows = (
   const oppositePreviewByPath = new Map(
     oppositePreviewEntries.map((entry) => [normalizePath(entry.relativePath).toLowerCase(), entry]),
   );
+  const previewByPath = new Map(previewEntries.map((entry) => [normalizePath(entry.relativePath).toLowerCase(), entry]));
 
   const liveRows: PaneRow[] = previewEntries.map((entry) => {
     const relativePath = normalizePath(entry.relativePath);
@@ -512,6 +541,35 @@ const buildPaneRows = (
     };
   });
 
+  if (side === 'backup') {
+    for (const entry of oppositePreviewEntries) {
+      const relativePath = normalizePath(entry.relativePath);
+
+      if (entry.kind !== 'file' || previewByPath.has(relativePath.toLowerCase())) {
+        continue;
+      }
+
+      liveRows.push({
+        kind: 'missingPlaceholder',
+        side,
+        relativePath,
+        name: entry.name,
+        displayPath: relativePath,
+        sizeBytes: entry.sizeBytes,
+      });
+    }
+  }
+
+  liveRows.sort((left, right) => {
+    const weightDifference = rowSortWeight(left) - rowSortWeight(right);
+
+    if (weightDifference !== 0) {
+      return weightDifference;
+    }
+
+    return left.displayPath.localeCompare(right.displayPath);
+  });
+
   return [...rows, ...liveRows].filter(
     (row) => matchesFilter(row, filter, failedPaths) && matchesSearch(row, search),
   );
@@ -527,6 +585,14 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
     return null;
   }
 
+  if (row.kind === 'missingPlaceholder') {
+    return (
+      <span className="indicator indicator-plus" title="Missing in backup">
+        <Plus size={15} aria-hidden="true" />
+      </span>
+    );
+  }
+
   if (row.kind === 'folder') {
     if (!row.countsKnown) {
       return null;
@@ -536,7 +602,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
       <div className="badges">
         {row.counts.missingInBackup > 0 && side === 'origin' ? (
           <span className="badge badge-plus" title="Ready to copy">
-            <Check size={12} aria-hidden="true" />
+            <Plus size={12} aria-hidden="true" />
             {row.counts.missingInBackup} missing
           </span>
         ) : null}
@@ -593,7 +659,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
   if (row.file.state === 'missingInBackup') {
     return (
       <span className="indicator indicator-plus" title="Ready to copy">
-        <Check size={15} aria-hidden="true" />
+        <Plus size={15} aria-hidden="true" />
       </span>
     );
   }
@@ -1415,6 +1481,20 @@ const App = () => {
           const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
           const eligible = rowIsSelectable(row);
           const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
+          const rowClasses = ['explorer-row'];
+
+          if (selected || folderSelected) {
+            rowClasses.push('explorer-row-selected');
+          }
+
+          if (
+            (row.kind === 'file' && row.file.state === 'missingInBackup') ||
+            (row.kind === 'folder' && side === 'origin' && row.counts.missingInBackup > 0) ||
+            row.kind === 'missingPlaceholder'
+          ) {
+            rowClasses.push('explorer-row-missing');
+          }
+
           const activateRow = () => {
             if (isFolderRow) {
               navigatePane(side, row.relativePath);
@@ -1438,7 +1518,7 @@ const App = () => {
 
           return (
             <div
-              className={selected || folderSelected ? 'explorer-row explorer-row-selected' : 'explorer-row'}
+              className={rowClasses.join(' ')}
               key={`${side}-${row.kind}-${row.relativePath}`}
               role="button"
               tabIndex={0}
@@ -1488,6 +1568,8 @@ const App = () => {
                   ? formatBytes(row.file.sizeBytes)
                   : row.kind === 'previewFile'
                     ? formatBytes(row.sizeBytes)
+                    : row.kind === 'missingPlaceholder'
+                      ? 'Missing'
                     : ''}
               </span>
             </div>

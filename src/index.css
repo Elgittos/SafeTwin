@@ -531,6 +531,14 @@ select {
   background: #203853;
 }
 
+.explorer-row-missing {
+  background: #effaf3;
+}
+
+.theme-dark .explorer-row-missing {
+  background: #14261f;
+}
+
 .row-select,
 .row-icon,
 .row-status {
