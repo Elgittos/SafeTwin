@@ -62,6 +62,20 @@ export class FolderPairService {
     return this.listFolderPairs()[0] ?? null;
   }
 
+  getFolderPairByPaths(originPath: string, backupPath: string): FolderPair | null {
+    const row = this.db.get<FolderPairRow>(
+      `SELECT id, name, origin_path, backup_path, mirror_navigation_enabled,
+              reminder_interval_days, last_scan_at, last_operation_at
+       FROM folder_pairs
+       WHERE origin_path = ? AND backup_path = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+      [originPath, backupPath],
+    );
+
+    return row ? toFolderPair(row) : null;
+  }
+
   getFolderPair(id: number): FolderPair {
     const row = this.db.get<FolderPairRow>(
       `SELECT id, name, origin_path, backup_path, mirror_navigation_enabled,
@@ -97,6 +111,12 @@ export class FolderPairService {
         [input.name, input.originPath, input.backupPath, mirrorNavigationEnabled ? 1 : 0, reminderIntervalDays, input.id],
       );
       return this.getFolderPair(input.id);
+    }
+
+    const existingPairForPaths = this.getFolderPairByPaths(input.originPath, input.backupPath);
+
+    if (existingPairForPaths) {
+      return this.saveFolderPair({ ...input, id: existingPairForPaths.id });
     }
 
     const mirrorNavigationEnabled = input.mirrorNavigationEnabled === false ? 0 : 1;

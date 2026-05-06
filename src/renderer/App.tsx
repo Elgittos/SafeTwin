@@ -214,6 +214,21 @@ const parentPath = (relativePath: string): string => {
   return slashIndex === -1 ? '' : normalized.slice(0, slashIndex);
 };
 
+const breadcrumbParts = (relativePath: string): Array<{ name: string; relativePath: string }> => {
+  const normalized = normalizePath(relativePath);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const parts = normalized.split('/').filter(Boolean);
+
+  return parts.map((name, index) => ({
+    name,
+    relativePath: parts.slice(0, index + 1).join('/'),
+  }));
+};
+
 const basename = (relativePath: string): string => {
   const normalized = normalizePath(relativePath);
   return normalized.split('/').filter(Boolean).at(-1) ?? 'Root';
@@ -949,8 +964,10 @@ const App = () => {
       throw new Error('Choose both an origin folder and a recipient folder.');
     }
 
+    const useCurrentPairId =
+      activePair?.originPath === nextOriginPath && activePair.backupPath === nextBackupPath ? activePairId : null;
     const input: SaveFolderPairInput = {
-      id: activePairId ?? undefined,
+      id: useCurrentPairId ?? undefined,
       name: nextPairName || getDefaultPairName(nextOriginPath, nextBackupPath),
       originPath: nextOriginPath,
       backupPath: nextBackupPath,
@@ -963,6 +980,19 @@ const App = () => {
     setOriginPath(savedPair.originPath);
     setBackupPath(savedPair.backupPath);
     setPairName(savedPair.name);
+
+    const [status, operations, ignored] = await Promise.all([
+      window.safetwin.getLastStatus(savedPair.id),
+      window.safetwin.listOperations(savedPair.id),
+      window.safetwin.getIgnoredFiles(savedPair.id),
+    ]);
+    setPairs([status.folderPair]);
+    setScanResult(status.lastScan);
+    setOperationHistory(operations);
+    setOperation(
+      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
+    );
+    setIgnoredFiles(ignored);
 
     return savedPair;
   };
@@ -1392,9 +1422,17 @@ const App = () => {
 
     try {
       const savedPair = await savePair();
-      const currentScan = scanResult ?? (await scanSavedPair(savedPair));
+      let currentScan = scanResult;
 
       if (!currentScan) {
+        const status = await window.safetwin.getLastStatus(savedPair.id);
+        currentScan = status.lastScan;
+        setPairs([status.folderPair]);
+        setScanResult(status.lastScan);
+      }
+
+      if (!currentScan) {
+        setError('Run Scan only once first. After that SafeTwin reuses the cached missing-files list.');
         return;
       }
 
@@ -1581,10 +1619,22 @@ const App = () => {
       </header>
 
       <div className="breadcrumb">
-        <button type="button" title="Back" disabled={!pathValue} onClick={() => navigatePane(side, parentPath(pathValue))}>
+        <button type="button" title="Back" onClick={() => navigatePane(side, parentPath(pathValue))}>
           <ChevronLeft size={15} aria-hidden="true" />
         </button>
-        <span>{pathValue || 'Root'}</span>
+        <button type="button" className="breadcrumb-link" onClick={() => navigatePane(side, '')}>
+          Root
+        </button>
+        {breadcrumbParts(pathValue).map((part) => (
+          <button
+            type="button"
+            className="breadcrumb-link"
+            key={`${side}-crumb-${part.relativePath}`}
+            onClick={() => navigatePane(side, part.relativePath)}
+          >
+            {part.name}
+          </button>
+        ))}
       </div>
 
       <div className="pane-list">

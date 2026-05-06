@@ -633,13 +633,13 @@ select {
 }
 
 .breadcrumb {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: 6px;
   min-height: 30px;
   padding: 2px 8px;
   border-bottom: 1px solid #edf1f5;
+  overflow: hidden;
 }
 
 .theme-dark .breadcrumb {
@@ -650,6 +650,17 @@ select {
   width: 28px;
   min-height: 26px;
   padding: 0;
+}
+
+.breadcrumb .breadcrumb-link {
+  width: auto;
+  max-width: 180px;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pane-list {

@@ -87,6 +87,14 @@ describe('ScannerService', () => {
       );
       expect(folderPairs.getLastFolderPair()?.id).toBe(pair.id);
 
+      const sameFolders = folderPairs.saveFolderPair({
+        name: 'Same remembered folders',
+        originPath,
+        backupPath,
+      });
+      expect(sameFolders.id).toBe(pair.id);
+      expect(folderPairs.getLastStatus(sameFolders.id).lastScan?.summary.missingInBackup).toBe(1);
+
       const newerPair = folderPairs.saveFolderPair({
         name: 'Newer remembered folders',
         originPath: path.join(root, 'new-origin'),
