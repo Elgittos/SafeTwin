@@ -83,6 +83,14 @@ export interface ScanSummary {
   totalBackupOnlySize: number;
 }
 
+export interface DirectoryDiffSamples {
+  missingInBackup: string[];
+  backupOnly: string[];
+  conflicts: string[];
+  ignored: string[];
+  skipped: string[];
+}
+
 export interface FileCompareItem {
   relativePath: string;
   displayPath: string;
@@ -103,6 +111,7 @@ export interface DirectoryDiffSummary {
   relativePath: string;
   displayPath: string;
   counts: ScanSummary;
+  samples?: DirectoryDiffSamples;
 }
 
 export interface ScanResult {

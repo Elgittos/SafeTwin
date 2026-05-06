@@ -1,10 +1,69 @@
-import type { DirectoryDiffSummary, FolderPair, ScanSummary } from '../../shared/types';
+import type {
+  DirectoryDiffSamples,
+  DirectoryDiffSummary,
+  FileCompareState,
+  FolderPair,
+  ScanSummary,
+} from '../../shared/types';
 import type { IgnoreRuleService } from '../ignore/ignoreRules';
 import { compareFiles, createEmptySummary, incrementSummary } from './comparisonEngine';
 import { walkFiles } from './fileWalker';
 
 const normalizeRelativePath = (relativePath: string): string =>
   relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
+
+const sampleLimit = 3;
+
+interface SummaryBucket {
+  counts: ScanSummary;
+  samples: DirectoryDiffSamples;
+}
+
+const createEmptySamples = (): DirectoryDiffSamples => ({
+  missingInBackup: [],
+  backupOnly: [],
+  conflicts: [],
+  ignored: [],
+  skipped: [],
+});
+
+const createBucket = (): SummaryBucket => ({
+  counts: createEmptySummary(),
+  samples: createEmptySamples(),
+});
+
+const sampleKeyForState = (state: FileCompareState): keyof DirectoryDiffSamples | null => {
+  if (state === 'missingInBackup') {
+    return 'missingInBackup';
+  }
+
+  if (state === 'backupOnly') {
+    return 'backupOnly';
+  }
+
+  if (state === 'conflictSamePathDifferentContent') {
+    return 'conflicts';
+  }
+
+  if (state === 'ignored') {
+    return 'ignored';
+  }
+
+  if (state === 'notLocalPlaceholder' || state === 'lockedOrUnreadable' || state === 'unstableChangingFile') {
+    return 'skipped';
+  }
+
+  return null;
+};
+
+const addToBucket = (bucket: SummaryBucket, state: FileCompareState, sizeBytes: number, displayPath: string): void => {
+  incrementSummary(bucket.counts, state, sizeBytes);
+
+  const sampleKey = sampleKeyForState(state);
+  if (sampleKey && bucket.samples[sampleKey].length < sampleLimit) {
+    bucket.samples[sampleKey].push(displayPath);
+  }
+};
 
 const descendantFoldersFor = (filePath: string, currentPath: string): string[] => {
   const displayPath = normalizeRelativePath(filePath);
@@ -49,24 +108,30 @@ export const summarizeDirectoryDifferences = async (
     ignoredFiles: [...originWalk.ignoredFiles, ...backupWalk.ignoredFiles],
     skippedFiles: [...originWalk.skippedFiles, ...backupWalk.skippedFiles],
   });
-  const summaries = new Map<string, ScanSummary>();
-  summaries.set(normalizedRelativePath, createEmptySummary());
+  const summaries = new Map<string, SummaryBucket>();
+  summaries.set(normalizedRelativePath, createBucket());
 
   for (const file of comparison.files) {
-    incrementSummary(summaries.get(normalizedRelativePath) ?? createEmptySummary(), file.state, file.sizeBytes);
+    addToBucket(
+      summaries.get(normalizedRelativePath) ?? createBucket(),
+      file.state,
+      file.sizeBytes,
+      file.displayPath,
+    );
 
     for (const folderPath of descendantFoldersFor(file.displayPath, normalizedRelativePath)) {
-      const summary = summaries.get(folderPath) ?? createEmptySummary();
-      incrementSummary(summary, file.state, file.sizeBytes);
+      const summary = summaries.get(folderPath) ?? createBucket();
+      addToBucket(summary, file.state, file.sizeBytes, file.displayPath);
       summaries.set(folderPath, summary);
     }
   }
 
   return [...summaries.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([folderPath, counts]) => ({
+    .map(([folderPath, bucket]) => ({
       relativePath: folderPath,
       displayPath: folderPath || 'Root',
-      counts,
+      counts: bucket.counts,
+      samples: bucket.samples,
     }));
 };

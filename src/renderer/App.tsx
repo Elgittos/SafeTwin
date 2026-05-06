@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import type {
   CleanupPreview,
+  DirectoryDiffSamples,
   DirectoryPreviewEntry,
   DirectoryDiffSummary,
   FileCompareItem,
@@ -85,6 +86,7 @@ interface FolderRow {
   displayPath: string;
   counts: ScanSummary;
   countsKnown: boolean;
+  samples: DirectoryDiffSamples | null;
   failedCount: number;
 }
 
@@ -260,6 +262,14 @@ const sidePath = (file: FileCompareItem, side: PaneSide): string | null =>
 
 const skippedCount = (summary: ScanSummary): number =>
   summary.notLocalPlaceholder + summary.lockedOrUnreadable + summary.unstableChangingFile;
+
+const samplesTitle = (label: string, count: number, samples?: string[] | null): string => {
+  if (!samples?.length) {
+    return label;
+  }
+
+  return `${label}: ${count}\nExamples:\n${samples.join('\n')}`;
+};
 
 const progressPercent = (done: number, total: number): number => (total > 0 ? Math.round((done / total) * 100) : 0);
 
@@ -483,8 +493,8 @@ const buildPaneRows = (
   const folderCounts = new Map(
     (scanResult?.folders ?? []).map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder.counts]),
   );
-  const quickFolderCounts = new Map(
-    quickFolderSummaries.map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder.counts]),
+  const quickFolderDetails = new Map(
+    quickFolderSummaries.map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder]),
   );
   const scanFilesByPath = new Map(
     (scanResult?.files ?? [])
@@ -501,7 +511,8 @@ const buildPaneRows = (
 
     if (entry.kind === 'folder') {
       const normalizedKey = relativePath.toLowerCase();
-      const quickCounts = quickFolderCounts.get(normalizedKey);
+      const quickDetails = quickFolderDetails.get(normalizedKey);
+      const quickCounts = quickDetails?.counts;
       const cachedCounts = folderCounts.get(normalizedKey);
 
       return {
@@ -512,6 +523,7 @@ const buildPaneRows = (
         displayPath: relativePath,
         counts: quickCounts ?? cachedCounts ?? emptySummary(),
         countsKnown: Boolean(quickCounts ?? cachedCounts),
+        samples: quickDetails?.samples ?? null,
         failedCount: descendantCount(failedPaths, relativePath),
       };
     }
@@ -605,23 +617,39 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
     return (
       <div className="badges">
         {row.counts.missingInBackup > 0 && side === 'origin' ? (
-          <span className="badge badge-plus" title="Ready to copy">
+          <span
+            className="badge badge-plus"
+            title={samplesTitle('Ready to copy', row.counts.missingInBackup, row.samples?.missingInBackup)}
+          >
             <Plus size={12} aria-hidden="true" />
             {row.counts.missingInBackup} missing
           </span>
         ) : null}
         {row.counts.backupOnly > 0 && side === 'backup' ? (
-          <span className="badge badge-minus" title="Backup-only cleanup candidate">
+          <span
+            className="badge badge-minus"
+            title={samplesTitle('Backup-only cleanup candidate', row.counts.backupOnly, row.samples?.backupOnly)}
+          >
             -{row.counts.backupOnly}
           </span>
         ) : null}
         {row.counts.conflicts > 0 ? (
-          <span className="badge badge-warn" title="Same name, different file">
+          <span
+            className="badge badge-warn"
+            title={samplesTitle('Same name, different file', row.counts.conflicts, row.samples?.conflicts)}
+          >
             !{row.counts.conflicts}
           </span>
         ) : null}
         {skippedCount(row.counts) > 0 ? (
-          <span className="badge badge-muted" title="Cloud-only placeholder skipped or file is locked">
+          <span
+            className="badge badge-muted"
+            title={samplesTitle(
+              'Cloud-only placeholder skipped or file is locked',
+              skippedCount(row.counts),
+              row.samples?.skipped,
+            )}
+          >
             {skippedCount(row.counts)}
           </span>
         ) : null}

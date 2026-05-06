@@ -74,6 +74,12 @@ describe('summarizeDirectoryDifferences', () => {
       expect(quickMediaRoot?.missingInBackup).toBe(scannerMediaRoot?.missingInBackup);
       expect(quickMediaRoot?.backupOnly).toBe(scannerMediaRoot?.backupOnly);
       expect(quickMediaRoot?.conflicts).toBe(scannerMediaRoot?.conflicts);
+      expect(quickMediaChildren.find((folder) => folder.relativePath === 'Media')?.samples?.missingInBackup).toContain(
+        'Media/missing.jpg',
+      );
+      expect(quickFolders.find((folder) => folder.relativePath === 'Documents')?.samples?.ignored).toContain(
+        'Documents/ignored.tmp',
+      );
     } finally {
       db.close();
     }
