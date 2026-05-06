@@ -31,12 +31,20 @@ export interface SqliteDatabase {
   close: () => void;
 }
 
-export const getDatabasePath = (): string => {
+export const getDataDirectory = (): string => {
   const dataDir = path.join(app.getPath('userData'), 'safetwin-data');
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 
-  return path.join(dataDir, 'cache.sqlite');
+  return dataDir;
+};
+
+export const getDatabasePath = (): string => {
+  return path.join(getDataDirectory(), 'cache.sqlite');
+};
+
+export const getOperationsLogPath = (): string => {
+  return path.join(getDataDirectory(), 'logs', 'operations.jsonl');
 };
 
 export const openDatabase = (databasePath = getDatabasePath()): SqliteDatabase => {

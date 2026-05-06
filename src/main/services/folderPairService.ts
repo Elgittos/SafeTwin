@@ -102,6 +102,15 @@ export class FolderPairService {
     );
   }
 
+  markOperationAt(folderPairId: number, operationAt: string): void {
+    this.db.run(
+      `UPDATE folder_pairs
+       SET last_operation_at = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [operationAt, folderPairId],
+    );
+  }
+
   getIgnoredFiles(folderPairId: number): IgnoredFile[] {
     const scanRun = this.db.get<{ id: number }>(
       `SELECT id

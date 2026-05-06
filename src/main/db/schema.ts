@@ -1,5 +1,14 @@
 import type { SqliteDatabase } from './sqlite';
 
+const addColumnIfMissing = (db: SqliteDatabase, tableName: string, columnName: string, definition: string): void => {
+  const columns = db.all<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const exists = columns.some((column) => String(column.name) === columnName);
+
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`);
+  }
+};
+
 export const initializeSchema = (db: SqliteDatabase): void => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS folder_pairs (
@@ -77,6 +86,7 @@ export const initializeSchema = (db: SqliteDatabase): void => {
       type TEXT NOT NULL,
       state TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      started_at TEXT,
       completed_at TEXT,
       error_message TEXT,
       FOREIGN KEY (folder_pair_id) REFERENCES folder_pairs(id) ON DELETE CASCADE
@@ -86,14 +96,31 @@ export const initializeSchema = (db: SqliteDatabase): void => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       operation_id INTEGER NOT NULL,
       action TEXT NOT NULL,
+      relative_path TEXT NOT NULL DEFAULT '',
       source_path TEXT,
       destination_path TEXT,
+      temp_path TEXT,
       state TEXT NOT NULL,
       bytes_total INTEGER NOT NULL DEFAULT 0,
       bytes_done INTEGER NOT NULL DEFAULT 0,
-      verification_state TEXT,
+      current_speed_bytes_per_second INTEGER NOT NULL DEFAULT 0,
+      verification_state TEXT NOT NULL DEFAULT 'notStarted',
+      verification_level TEXT NOT NULL DEFAULT 'auto',
       error_message TEXT,
+      started_at TEXT,
+      completed_at TEXT,
       FOREIGN KEY (operation_id) REFERENCES operations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operation_id INTEGER,
+      operation_item_id INTEGER,
+      type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (operation_id) REFERENCES operations(id) ON DELETE SET NULL,
+      FOREIGN KEY (operation_item_id) REFERENCES operation_items(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -103,5 +130,14 @@ export const initializeSchema = (db: SqliteDatabase): void => {
 
     CREATE INDEX IF NOT EXISTS idx_file_entries_scan_key ON file_entries(scan_run_id, normalized_key);
     CREATE INDEX IF NOT EXISTS idx_compare_results_scan_state ON compare_results(scan_run_id, state);
+    CREATE INDEX IF NOT EXISTS idx_operation_items_operation_state ON operation_items(operation_id, state);
   `);
+
+  addColumnIfMissing(db, 'operations', 'started_at', 'TEXT');
+  addColumnIfMissing(db, 'operation_items', 'relative_path', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, 'operation_items', 'temp_path', 'TEXT');
+  addColumnIfMissing(db, 'operation_items', 'current_speed_bytes_per_second', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(db, 'operation_items', 'verification_level', "TEXT NOT NULL DEFAULT 'auto'");
+  addColumnIfMissing(db, 'operation_items', 'started_at', 'TEXT');
+  addColumnIfMissing(db, 'operation_items', 'completed_at', 'TEXT');
 };

@@ -19,6 +19,18 @@ export type ScanMode = 'metadata' | 'deep';
 
 export type FolderSide = 'origin' | 'backup';
 
+export type VerificationState = 'notStarted' | 'sizeVerified' | 'hashVerified' | 'failed';
+
+export type VerificationLevel = 'auto' | 'basic' | 'strong';
+
+export type QueueItemState = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export type OperationState = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export type OperationType = 'copy' | 'cleanup';
+
+export type OperationAction = 'copyMissing' | 'copyConflictDuplicate' | 'cleanupBackupOnly';
+
 export interface FolderPair {
   id: number;
   name: string;
@@ -83,6 +95,91 @@ export interface ScanResult {
   ignoredFiles: IgnoredFile[];
 }
 
+export interface OperationRecord {
+  id: number;
+  folderPairId: number;
+  type: OperationType;
+  state: OperationState;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export interface OperationQueueItem {
+  id: number;
+  operationId: number;
+  action: OperationAction;
+  relativePath: string;
+  sourcePath: string | null;
+  destinationPath: string | null;
+  tempPath: string | null;
+  state: QueueItemState;
+  bytesTotal: number;
+  bytesDone: number;
+  currentSpeedBytesPerSecond: number;
+  verificationState: VerificationState;
+  verificationLevel: VerificationLevel;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface OperationTotals {
+  totalItems: number;
+  pendingItems: number;
+  runningItems: number;
+  pausedItems: number;
+  completedItems: number;
+  failedItems: number;
+  cancelledItems: number;
+  bytesTotal: number;
+  bytesDone: number;
+  currentSpeedBytesPerSecond: number;
+}
+
+export interface OperationSnapshot {
+  operation: OperationRecord;
+  items: OperationQueueItem[];
+  totals: OperationTotals;
+}
+
+export interface CreateCopyOperationInput {
+  folderPairId: number;
+  selectedRelativePaths: string[];
+  verificationLevel?: VerificationLevel;
+}
+
+export interface CleanupPreviewInput {
+  folderPairId: number;
+  selectedRelativePaths: string[];
+  selectedFolderPaths?: string[];
+}
+
+export interface CleanupPreviewItem {
+  relativePath: string;
+  displayPath: string;
+  backupPath: string;
+  sizeBytes: number;
+}
+
+export interface CleanupPreview {
+  filesSelected: number;
+  foldersSelected: number;
+  totalSize: number;
+  items: CleanupPreviewItem[];
+}
+
+export type CreateCleanupOperationInput = CleanupPreviewInput;
+
+export interface RecoveryReport {
+  abandonedTempFilesRemoved: number;
+  interruptedItemsMarkedFailed: number;
+  interruptedOperationsMarkedFailed: number;
+  pausedItems: number;
+  failedItems: number;
+}
+
 export interface LastStatus {
   folderPair: FolderPair;
   lastScan: ScanResult | null;
@@ -100,4 +197,17 @@ export interface SafeTwinApi {
   scanPair: (pairId: number, mode?: ScanMode) => Promise<ScanResult>;
   getIgnoredFiles: (pairId: number) => Promise<IgnoredFile[]>;
   getLastStatus: (pairId: number) => Promise<LastStatus>;
+  createCopyOperation: (input: CreateCopyOperationInput) => Promise<OperationSnapshot>;
+  createCleanupPreview: (input: CleanupPreviewInput) => Promise<CleanupPreview>;
+  createCleanupOperation: (input: CreateCleanupOperationInput) => Promise<OperationSnapshot>;
+  listOperations: (folderPairId?: number) => Promise<OperationSnapshot[]>;
+  getOperation: (operationId: number) => Promise<OperationSnapshot>;
+  startOperation: (operationId: number) => Promise<OperationSnapshot>;
+  pauseOperation: (operationId: number) => Promise<OperationSnapshot>;
+  resumeOperation: (operationId: number) => Promise<OperationSnapshot>;
+  cancelOperation: (operationId: number) => Promise<OperationSnapshot>;
+  retryFailedOperation: (operationId: number) => Promise<OperationSnapshot>;
+  recoverOperations: () => Promise<RecoveryReport>;
+  openFolder: (folderPath: string) => Promise<void>;
+  showItemInFolder: (itemPath: string) => Promise<void>;
 }

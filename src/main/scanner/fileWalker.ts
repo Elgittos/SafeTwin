@@ -128,7 +128,16 @@ export const walkFiles = async (
         continue;
       }
 
-      if (!(await isStable(absolutePath))) {
+      let stable = false;
+
+      try {
+        stable = await isStable(absolutePath);
+      } catch {
+        skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unreadable', null));
+        continue;
+      }
+
+      if (!stable) {
         skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unstable', null));
         continue;
       }
