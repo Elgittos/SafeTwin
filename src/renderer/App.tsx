@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
-  ArrowRight,
+  Check,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
@@ -83,6 +83,7 @@ interface FolderRow {
   name: string;
   displayPath: string;
   counts: ScanSummary;
+  countsKnown: boolean;
   failedCount: number;
 }
 
@@ -466,16 +467,18 @@ const buildPaneRows = (
     const relativePath = normalizePath(entry.relativePath);
 
     if (entry.kind === 'folder') {
+      const normalizedKey = relativePath.toLowerCase();
+      const quickCounts = quickFolderCounts.get(normalizedKey);
+      const cachedCounts = folderCounts.get(normalizedKey);
+
       return {
         kind: 'folder',
         side,
         relativePath,
         name: entry.name,
         displayPath: relativePath,
-        counts:
-          quickFolderCounts.get(relativePath.toLowerCase()) ??
-          folderCounts.get(relativePath.toLowerCase()) ??
-          emptySummary(),
+        counts: quickCounts ?? cachedCounts ?? emptySummary(),
+        countsKnown: Boolean(quickCounts ?? cachedCounts),
         failedCount: descendantCount(failedPaths, relativePath),
       };
     }
@@ -525,12 +528,16 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
   }
 
   if (row.kind === 'folder') {
+    if (!row.countsKnown) {
+      return null;
+    }
+
     return (
       <div className="badges">
         {row.counts.missingInBackup > 0 && side === 'origin' ? (
           <span className="badge badge-plus" title="Ready to copy">
-            <ArrowRight size={12} aria-hidden="true" />
-            {row.counts.missingInBackup}
+            <Check size={12} aria-hidden="true" />
+            {row.counts.missingInBackup} missing
           </span>
         ) : null}
         {row.counts.backupOnly > 0 && side === 'backup' ? (
@@ -560,7 +567,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
           row.failedCount ===
         0 ? (
           <span className="badge badge-plus" title="Present on both sides">
-            <ArrowRight size={12} aria-hidden="true" />
+            <Check size={12} aria-hidden="true" />
           </span>
         ) : null}
       </div>
@@ -586,7 +593,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
   if (row.file.state === 'missingInBackup') {
     return (
       <span className="indicator indicator-plus" title="Ready to copy">
-        <ArrowRight size={15} aria-hidden="true" />
+        <Check size={15} aria-hidden="true" />
       </span>
     );
   }
@@ -594,7 +601,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
   if (row.file.state === 'identical') {
     return (
       <span className="indicator indicator-plus" title="Present on both sides">
-        <ArrowRight size={15} aria-hidden="true" />
+        <Check size={15} aria-hidden="true" />
       </span>
     );
   }
