@@ -34,7 +34,7 @@ const createWindow = () => {
     );
   }
 
-  if (!app.isPackaged) {
+  if (!app.isPackaged && process.env.SAFETWIN_DEVTOOLS === '1') {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 };
