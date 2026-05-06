@@ -59,7 +59,11 @@ export const registerIpcHandlers = async (): Promise<void> => {
 
   ipcMain.handle('safetwin:scan-pair', async (_event, pairId: number, mode: ScanMode = 'metadata') => {
     const pair = folderPairs.getFolderPair(pairId);
-    const result = await scanner.scanPair(pair, mode);
+    const result = await scanner.scanPair(pair, mode, {
+      onProgress: (progress) => {
+        _event.sender.send('safetwin:scan-progress', progress);
+      },
+    });
     folderPairs.markScanned(pair.id, result.completedAt);
     return result;
   });

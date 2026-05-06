@@ -5,6 +5,28 @@ import type { LocalAvailability } from '../../shared/types';
 
 const execFileAsync = promisify(execFile);
 const cloudAttributeFlags = new Set(['O', 'U']);
+const cloudPathHints = ['onedrive', 'dropbox', 'google drive', 'iclouddrive'];
+
+export interface AvailabilityOptions {
+  checkCloudAttributes?: boolean;
+}
+
+const isLikelyCloudPath = (filePath: string): boolean => {
+  const normalizedPath = filePath.toLowerCase();
+  const envRoots = [
+    process.env.OneDrive,
+    process.env.OneDriveConsumer,
+    process.env.OneDriveCommercial,
+    process.env.DROPBOX,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase());
+
+  return (
+    envRoots.some((root) => normalizedPath.startsWith(root)) ||
+    cloudPathHints.some((hint) => normalizedPath.includes(`\\${hint}\\`) || normalizedPath.includes(`/${hint}/`))
+  );
+};
 
 const getAttribFlags = async (filePath: string): Promise<Set<string>> => {
   if (process.platform !== 'win32') {
@@ -19,7 +41,10 @@ const getAttribFlags = async (filePath: string): Promise<Set<string>> => {
   return new Set(attributeText.replaceAll(' ', '').split(''));
 };
 
-export const getLocalAvailability = async (filePath: string): Promise<LocalAvailability> => {
+export const getLocalAvailability = async (
+  filePath: string,
+  options: AvailabilityOptions = {},
+): Promise<LocalAvailability> => {
   try {
     const stats = await fs.lstat(filePath);
 
@@ -27,7 +52,7 @@ export const getLocalAvailability = async (filePath: string): Promise<LocalAvail
       return 'specialSkipped';
     }
 
-    if (process.platform === 'win32') {
+    if (process.platform === 'win32' && options.checkCloudAttributes !== false && isLikelyCloudPath(filePath)) {
       const flags = await getAttribFlags(filePath);
 
       for (const flag of cloudAttributeFlags) {

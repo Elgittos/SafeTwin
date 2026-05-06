@@ -10,10 +10,24 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    icon: 'assets/icon',
+    name: 'SafeTwin',
+    executableName: 'SafeTwin',
+    win32metadata: {
+      CompanyName: 'Elgittos',
+      FileDescription: 'SafeTwin',
+      OriginalFilename: 'SafeTwin.exe',
+      ProductName: 'SafeTwin',
+      InternalName: 'SafeTwin',
+    },
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: 'SafeTwin',
+      setupExe: 'SafeTwinSetup.exe',
+      setupIcon: 'assets/icon.ico',
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),

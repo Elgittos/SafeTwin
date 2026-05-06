@@ -13,6 +13,7 @@
     "lint": "eslint --ext .ts,.tsx .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "smoke:setup": "powershell -ExecutionPolicy Bypass -File scripts/create-smoke-folders.ps1",
     "format": "prettier --write ."
   },
   "keywords": [],

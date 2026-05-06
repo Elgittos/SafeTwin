@@ -14,4 +14,8 @@ Phase 2 adds safe file operations: copy queues for missing and conflict files, c
 
 Phase 3 adds the Windows Explorer-style UI: two-pane Origin and Backup navigation, mirrored folder browsing, compact state indicators, selection mode, filters, search, ignore-rule settings, reminder settings, last backup status, and a bottom operation drawer.
 
+## Phase 4
+
+Phase 4 packages SafeTwin as a personal Windows app with app metadata, icon, installer/build output, persistent folder pairs, SQLite cache, operation logs, startup recovery, scan progress feedback, and a disposable-folder smoke test.
+
 See [SafeTwin Preview Cheat Sheet](docs/PREVIEW_CHEATSHEET.md) for local preview commands.

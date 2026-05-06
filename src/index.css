@@ -234,6 +234,41 @@ select {
   background: #fff1f1;
 }
 
+.scan-progress {
+  display: grid;
+  gap: 3px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #b8d7f0;
+  color: #184f72;
+  background: #e8f5ff;
+  font-size: 12px;
+}
+
+.theme-dark .scan-progress {
+  color: #b9dcf5;
+  border-color: #244b67;
+  background: #132536;
+}
+
+.scan-progress-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scan-progress p {
+  margin: 0;
+  overflow: hidden;
+  color: #42677f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-dark .scan-progress p {
+  color: #9db8cb;
+}
+
 .workspace-tools {
   justify-content: space-between;
   padding: 9px 16px;

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { getExtension, getRelativePath, normalizeComparisonKey, toDisplayPath } from '../../shared/pathKeys';
-import type { FolderSide, LocalAvailability } from '../../shared/types';
+import type { FolderSide, LocalAvailability, ScanMode } from '../../shared/types';
 import { IgnoreRuleService } from '../ignore/ignoreRules';
 import { getLocalAvailability } from '../platform/windowsFileAvailability';
 
@@ -29,6 +29,21 @@ export interface WalkResult {
   files: ScannedFile[];
   ignoredFiles: ScannedFile[];
   skippedFiles: ScannedFile[];
+  foldersDiscovered: number;
+}
+
+export interface WalkProgress {
+  side: FolderSide;
+  currentPath: string;
+  filesDiscovered: number;
+  foldersDiscovered: number;
+  ignored: number;
+  skipped: number;
+}
+
+export interface WalkOptions {
+  mode: ScanMode;
+  onProgress?: (progress: WalkProgress) => void;
 }
 
 const delay = (milliseconds: number): Promise<void> =>
@@ -84,16 +99,39 @@ export const walkFiles = async (
   rootPath: string,
   side: FolderSide,
   ignoreRules: IgnoreRuleService,
+  options: WalkOptions = { mode: 'metadata' },
 ): Promise<WalkResult> => {
   const files: ScannedFile[] = [];
   const ignoredFiles: ScannedFile[] = [];
   const skippedFiles: ScannedFile[] = [];
+  let foldersDiscovered = 0;
+  let lastProgressAt = 0;
+
+  const reportProgress = (currentPath: string, force = false): void => {
+    const now = Date.now();
+
+    if (!force && now - lastProgressAt < 150) {
+      return;
+    }
+
+    lastProgressAt = now;
+    options.onProgress?.({
+      side,
+      currentPath,
+      filesDiscovered: files.length,
+      foldersDiscovered,
+      ignored: ignoredFiles.length,
+      skipped: skippedFiles.length,
+    });
+  };
 
   const visit = async (directoryPath: string): Promise<void> => {
     let entries: Dirent[];
 
     try {
       entries = await fs.readdir(directoryPath, { withFileTypes: true });
+      foldersDiscovered += 1;
+      reportProgress(directoryPath);
     } catch {
       return;
     }
@@ -118,28 +156,36 @@ export const walkFiles = async (
 
       if (ignoreReason) {
         ignoredFiles.push(await createFileRecord(rootPath, absolutePath, side, 'localReady', ignoreReason));
+        reportProgress(absolutePath);
         continue;
       }
 
-      const availability = await getLocalAvailability(absolutePath);
+      const availability = await getLocalAvailability(absolutePath, {
+        checkCloudAttributes: true,
+      });
 
       if (availability !== 'localReady') {
         skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, availability, null));
+        reportProgress(absolutePath);
         continue;
       }
 
-      let stable = false;
+      if (options.mode === 'deep') {
+        let stable = false;
 
-      try {
-        stable = await isStable(absolutePath);
-      } catch {
-        skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unreadable', null));
-        continue;
-      }
+        try {
+          stable = await isStable(absolutePath);
+        } catch {
+          skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unreadable', null));
+          reportProgress(absolutePath);
+          continue;
+        }
 
-      if (!stable) {
-        skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unstable', null));
-        continue;
+        if (!stable) {
+          skippedFiles.push(await createFileRecord(rootPath, absolutePath, side, 'unstable', null));
+          reportProgress(absolutePath);
+          continue;
+        }
       }
 
       const stats = await fs.stat(absolutePath);
@@ -159,14 +205,17 @@ export const walkFiles = async (
         hash: null,
         hashCalculatedAt: null,
       });
+      reportProgress(absolutePath);
     }
   };
 
   await visit(rootPath);
+  reportProgress(rootPath, true);
 
   return {
     files,
     ignoredFiles,
     skippedFiles,
+    foldersDiscovered,
   };
 };

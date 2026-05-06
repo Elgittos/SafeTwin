@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
   CleanupPreviewInput,
   CreateCleanupOperationInput,
@@ -35,6 +35,16 @@ const api: SafeTwinApi = {
   recoverOperations: () => ipcRenderer.invoke('safetwin:recover-operations'),
   openFolder: (folderPath: string) => ipcRenderer.invoke('safetwin:open-folder', folderPath),
   showItemInFolder: (itemPath: string) => ipcRenderer.invoke('safetwin:show-item-in-folder', itemPath),
+  onScanProgress: (callback) => {
+    const listener = (_event: IpcRendererEvent, progress: Parameters<typeof callback>[0]) => {
+      callback(progress);
+    };
+    ipcRenderer.on('safetwin:scan-progress', listener);
+
+    return () => {
+      ipcRenderer.removeListener('safetwin:scan-progress', listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('safetwin', api);

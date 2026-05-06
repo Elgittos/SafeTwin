@@ -40,6 +40,7 @@ import type {
   OperationSnapshot,
   SaveFolderPairInput,
   ScanMode,
+  ScanProgressEvent,
   ScanResult,
   ScanSummary,
   VerificationLevel,
@@ -511,6 +512,7 @@ const App = () => {
   const [rightPath, setRightPath] = useState('');
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
+  const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
   const [ignoreRules, setIgnoreRules] = useState<IgnoreRuleSetting[]>([]);
   const [ignoredFiles, setIgnoredFiles] = useState<{ path: string; reason: string }[]>([]);
@@ -617,6 +619,12 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    return window.safetwin.onScanProgress((progress) => {
+      setScanProgress(progress);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
       return undefined;
     }
@@ -690,6 +698,19 @@ const App = () => {
   const scan = async (mode: ScanMode = 'metadata') => {
     setIsScanning(true);
     setError(null);
+    setScanProgress({
+      folderPairId: activePairId ?? 0,
+      scanRunId: null,
+      mode,
+      phase: 'starting',
+      side: 'both',
+      currentPath: '',
+      filesDiscovered: 0,
+      foldersDiscovered: 0,
+      ignored: 0,
+      skipped: 0,
+      message: 'Starting scan',
+    });
 
     try {
       const savedPair = await savePair();
@@ -705,6 +726,7 @@ const App = () => {
       setError(scanError instanceof Error ? scanError.message : 'Scan failed.');
     } finally {
       setIsScanning(false);
+      window.setTimeout(() => setScanProgress(null), 1400);
     }
   };
 
@@ -1039,6 +1061,22 @@ const App = () => {
       </section>
 
       {reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
+
+      {scanProgress ? (
+        <section className="scan-progress">
+          <div className="scan-progress-main">
+            <Loader2 className={isScanning ? 'spin' : ''} size={15} aria-hidden="true" />
+            <strong>{scanProgress.message}</strong>
+            <span>{scanProgress.mode === 'deep' ? 'Deep scan' : 'Scan'}</span>
+            <span>{scanProgress.side}</span>
+            <span>{scanProgress.filesDiscovered} files</span>
+            <span>{scanProgress.foldersDiscovered} folders</span>
+            <span>{scanProgress.ignored} ignored</span>
+            <span>{scanProgress.skipped} skipped</span>
+          </div>
+          <p>{scanProgress.currentPath || 'Preparing folders'}</p>
+        </section>
+      ) : null}
 
       {error ? (
         <div className="error-banner">

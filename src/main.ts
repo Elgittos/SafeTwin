@@ -8,6 +8,8 @@ if (started) {
   app.quit();
 }
 
+app.setName('SafeTwin');
+
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({

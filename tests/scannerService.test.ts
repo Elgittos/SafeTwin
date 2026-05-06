@@ -55,9 +55,16 @@ describe('ScannerService', () => {
         backupPath,
       });
 
-      const result = await scanner.scanPair(pair);
+      const progressMessages: string[] = [];
+      const result = await scanner.scanPair(pair, 'metadata', {
+        onProgress: (progress) => {
+          progressMessages.push(progress.phase);
+        },
+      });
       folderPairs.markScanned(pair.id, result.completedAt);
 
+      expect(progressMessages).toContain('walking');
+      expect(progressMessages).toContain('complete');
       expect(result.summary).toMatchObject({
         missingInBackup: 1,
         backupOnly: 1,

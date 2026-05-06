@@ -111,6 +111,22 @@ export interface ScanResult {
   ignoredFiles: IgnoredFile[];
 }
 
+export type ScanProgressPhase = 'starting' | 'walking' | 'caching' | 'comparing' | 'complete';
+
+export interface ScanProgressEvent {
+  folderPairId: number;
+  scanRunId: number | null;
+  mode: ScanMode;
+  phase: ScanProgressPhase;
+  side: FolderSide | 'both';
+  currentPath: string;
+  filesDiscovered: number;
+  foldersDiscovered: number;
+  ignored: number;
+  skipped: number;
+  message: string;
+}
+
 export interface OperationRecord {
   id: number;
   folderPairId: number;
@@ -229,4 +245,5 @@ export interface SafeTwinApi {
   recoverOperations: () => Promise<RecoveryReport>;
   openFolder: (folderPath: string) => Promise<void>;
   showItemInFolder: (itemPath: string) => Promise<void>;
+  onScanProgress: (callback: (event: ScanProgressEvent) => void) => () => void;
 }
