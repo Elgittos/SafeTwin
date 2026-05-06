@@ -77,12 +77,16 @@ export const registerIpcHandlers = async (): Promise<void> => {
       const absolutePath = path.join(directoryPath, entry.name);
       const kind = entry.isDirectory() ? 'folder' : 'file';
       let sizeBytes = 0;
+      let mtimeMs = 0;
 
       if (kind === 'file') {
         try {
-          sizeBytes = (await fs.stat(absolutePath)).size;
+          const stats = await fs.stat(absolutePath);
+          sizeBytes = stats.size;
+          mtimeMs = stats.mtimeMs;
         } catch {
           sizeBytes = 0;
+          mtimeMs = 0;
         }
       }
 
@@ -92,6 +96,7 @@ export const registerIpcHandlers = async (): Promise<void> => {
         absolutePath,
         kind,
         sizeBytes,
+        mtimeMs,
       });
     }
 

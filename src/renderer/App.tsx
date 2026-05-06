@@ -243,6 +243,39 @@ const skippedCount = (summary: ScanSummary): number =>
 
 const progressPercent = (done: number, total: number): number => (total > 0 ? Math.round((done / total) * 100) : 0);
 
+const createLiveCompareItem = (
+  side: PaneSide,
+  entry: DirectoryPreviewEntry,
+  oppositeEntry: DirectoryPreviewEntry | null,
+): FileCompareItem => {
+  const relativePath = normalizePath(entry.relativePath);
+  const oppositeFile = oppositeEntry?.kind === 'file' ? oppositeEntry : null;
+
+  if (!oppositeFile) {
+    return {
+      relativePath,
+      displayPath: relativePath,
+      state: side === 'origin' ? 'missingInBackup' : 'backupOnly',
+      originPath: side === 'origin' ? entry.absolutePath : null,
+      backupPath: side === 'backup' ? entry.absolutePath : null,
+      sizeBytes: entry.sizeBytes,
+      reason: side === 'origin' ? 'Visible in origin but not in backup' : 'Visible in backup but not in origin',
+    };
+  }
+
+  const matches = entry.sizeBytes === oppositeFile.sizeBytes && entry.mtimeMs === oppositeFile.mtimeMs;
+
+  return {
+    relativePath,
+    displayPath: relativePath,
+    state: matches ? 'identical' : 'conflictSamePathDifferentContent',
+    originPath: side === 'origin' ? entry.absolutePath : oppositeFile.absolutePath,
+    backupPath: side === 'backup' ? entry.absolutePath : oppositeFile.absolutePath,
+    sizeBytes: Math.max(entry.sizeBytes, oppositeFile.sizeBytes),
+    reason: matches ? 'Visible files have same size and modified time' : 'Visible files differ by size or modified time',
+  };
+};
+
 const stateLabel = (file: FileCompareItem): string => {
   if (file.state === 'missingInBackup') {
     return 'missing in backup ready to copy';
@@ -381,6 +414,7 @@ const buildPaneRows = (
   currentPath: string,
   scanResult: ScanResult | null,
   previewEntries: DirectoryPreviewEntry[],
+  oppositePreviewEntries: DirectoryPreviewEntry[],
   operationByPath: Map<string, OperationQueueItem>,
   failedPaths: Set<string>,
   filter: FilterKey,
@@ -404,6 +438,9 @@ const buildPaneRows = (
     (scanResult?.files ?? [])
       .filter((file) => fileVisibleOnSide(file, side))
       .map((file) => [normalizePath(file.displayPath).toLowerCase(), file]),
+  );
+  const oppositePreviewByPath = new Map(
+    oppositePreviewEntries.map((entry) => [normalizePath(entry.relativePath).toLowerCase(), entry]),
   );
 
   const liveRows: PaneRow[] = previewEntries.map((entry) => {
@@ -445,14 +482,16 @@ const buildPaneRows = (
       };
     }
 
+    const liveFile = createLiveCompareItem(side, entry, oppositePreviewByPath.get(relativePath.toLowerCase()) ?? null);
+
     return {
-      kind: 'previewFile',
+      kind: 'file',
       side,
-      relativePath,
+      relativePath: liveFile.relativePath,
       name: entry.name,
-      displayPath: relativePath,
-      absolutePath: entry.absolutePath,
-      sizeBytes: entry.sizeBytes,
+      displayPath: liveFile.displayPath,
+      file: liveFile,
+      operationItem: operationByPath.get(normalizePath(liveFile.relativePath).toLowerCase()) ?? null,
     };
   });
 
@@ -634,19 +673,53 @@ const App = () => {
     [operation],
   );
   const leftRows = useMemo(
-    () => buildPaneRows('origin', leftPath, scanResult, originPreviewEntries, operationByPath, failedPaths, filter, search),
-    [failedPaths, filter, leftPath, operationByPath, originPreviewEntries, scanResult, search],
+    () =>
+      buildPaneRows(
+        'origin',
+        leftPath,
+        scanResult,
+        originPreviewEntries,
+        backupPreviewEntries,
+        operationByPath,
+        failedPaths,
+        filter,
+        search,
+      ),
+    [backupPreviewEntries, failedPaths, filter, leftPath, operationByPath, originPreviewEntries, scanResult, search],
   );
   const rightRows = useMemo(
-    () => buildPaneRows('backup', rightPath, scanResult, backupPreviewEntries, operationByPath, failedPaths, filter, search),
-    [backupPreviewEntries, failedPaths, filter, operationByPath, rightPath, scanResult, search],
+    () =>
+      buildPaneRows(
+        'backup',
+        rightPath,
+        scanResult,
+        backupPreviewEntries,
+        originPreviewEntries,
+        operationByPath,
+        failedPaths,
+        filter,
+        search,
+      ),
+    [backupPreviewEntries, failedPaths, filter, operationByPath, originPreviewEntries, rightPath, scanResult, search],
   );
   const selectedFiles = useMemo(() => {
     const selected = new Set(selectedPaths);
-    return (scanResult?.files ?? []).filter(
+    const filesByPath = new Map<string, FileCompareItem>();
+
+    for (const file of scanResult?.files ?? []) {
+      filesByPath.set(normalizePath(file.relativePath).toLowerCase(), file);
+    }
+
+    for (const row of [...leftRows, ...rightRows]) {
+      if (row.kind === 'file') {
+        filesByPath.set(normalizePath(row.file.relativePath).toLowerCase(), row.file);
+      }
+    }
+
+    return [...filesByPath.values()].filter(
       (file) => selected.has(file.relativePath) || isInsideSelectedFolderPath(file, selectedFolderPaths),
     );
-  }, [scanResult, selectedFolderPaths, selectedPaths]);
+  }, [leftRows, rightRows, scanResult, selectedFolderPaths, selectedPaths]);
   const copySelectedFiles = useMemo(() => selectedFiles.filter(canCopy), [selectedFiles]);
   const cleanupSelectedFiles = useMemo(() => selectedFiles.filter(canCleanup), [selectedFiles]);
   const conflictSelectedFiles = useMemo(
@@ -1044,6 +1117,23 @@ const App = () => {
     setCopyPreview(null);
   };
 
+  const ensureScanIncludesSelection = async (paths: string[], folderPaths: string[] = []): Promise<void> => {
+    if (!activePairId || !originPath || !backupPath) {
+      return;
+    }
+
+    const scannedPaths = new Set((scanResult?.files ?? []).map((file) => normalizePath(file.relativePath).toLowerCase()));
+    const needsFreshScan =
+      folderPaths.length > 0 || paths.some((relativePath) => !scannedPaths.has(normalizePath(relativePath).toLowerCase()));
+
+    if (!needsFreshScan) {
+      return;
+    }
+
+    const savedPair = await savePair();
+    await scanSavedPair(savedPair);
+  };
+
   const createCopyQueue = async (paths: string[], folderPaths: string[] = []) => {
     if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
       return;
@@ -1053,6 +1143,7 @@ const App = () => {
     setError(null);
 
     try {
+      await ensureScanIncludesSelection(paths, folderPaths);
       const nextOperation = await window.safetwin.createCopyOperation({
         folderPairId: activePairId,
         selectedRelativePaths: paths,
@@ -1084,6 +1175,10 @@ const App = () => {
     setError(null);
 
     try {
+      await ensureScanIncludesSelection(
+        cleanupSelectedFiles.map((file) => file.relativePath),
+        selectedFolderPaths,
+      );
       const preview = await window.safetwin.createCleanupPreview({
         folderPairId: activePairId,
         selectedRelativePaths: cleanupSelectedFiles.map((file) => file.relativePath),

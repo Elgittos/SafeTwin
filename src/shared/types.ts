@@ -229,6 +229,7 @@ export interface DirectoryPreviewEntry {
   absolutePath: string;
   kind: 'folder' | 'file';
   sizeBytes: number;
+  mtimeMs: number;
 }
 
 export interface SafeTwinApi {
