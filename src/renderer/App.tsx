@@ -668,7 +668,7 @@ const App = () => {
     const savedTheme = window.localStorage.getItem('safetwin-theme');
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
-  const [filter, setFilter] = useState<FilterKey>('missing');
+  const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
   const [isScanning, setIsScanning] = useState(false);
