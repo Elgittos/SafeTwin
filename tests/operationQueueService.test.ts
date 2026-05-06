@@ -107,6 +107,7 @@ describe('OperationQueueService', () => {
 
     try {
       const pair = await createScannedPair(folderPairs, scanner, root);
+      const scanSpy = vi.spyOn(scanner, 'scanPair');
       const copyOperation = await operations.createCopyOperation({
         folderPairId: pair.id,
         selectedRelativePaths: ['missing.txt', path.join('nested', 'conflict.txt')],
@@ -119,6 +120,7 @@ describe('OperationQueueService', () => {
       expect(completed.operation.state).toBe('completed');
       expect(completed.items).toHaveLength(2);
       expect(completed.items.every((item) => item.verificationState === 'hashVerified')).toBe(true);
+      expect(scanSpy).not.toHaveBeenCalled();
       await expect(fs.readFile(path.join(pair.backupPath, 'missing.txt'), 'utf8')).resolves.toBe('missing');
 
       const conflictDestination = completed.items.find((item) => item.action === 'copyConflictDuplicate')?.destinationPath;
