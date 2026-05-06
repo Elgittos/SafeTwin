@@ -361,7 +361,7 @@ const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>
 
   if (row.kind === 'folder') {
     if (filter === 'missing') {
-      return true;
+      return row.counts.missingInBackup > 0;
     }
 
     if (filter === 'backupOnly') {
@@ -1400,28 +1400,39 @@ const App = () => {
           const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
           const eligible = rowIsSelectable(row);
           const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
+          const activateRow = () => {
+            if (isFolderRow) {
+              navigatePane(side, row.relativePath);
+            } else if (row.kind === 'file' && selectionMode) {
+              toggleSelectedPath(row.file);
+            }
+          };
+          const openItemLocation = () => {
+            if (row.kind !== 'file' && row.kind !== 'previewFile') {
+              return;
+            }
+
+            const itemPath = row.kind === 'file' ? sidePath(row.file, side) : row.absolutePath;
+
+            if (itemPath) {
+              window.safetwin.showItemInFolder(itemPath).catch((openError: unknown) => {
+                setError(toFriendlyError(openError, 'Could not open item folder.'));
+              });
+            }
+          };
 
           return (
-            <button
+            <div
               className={selected || folderSelected ? 'explorer-row explorer-row-selected' : 'explorer-row'}
               key={`${side}-${row.kind}-${row.relativePath}`}
-              type="button"
-              onClick={() => {
-                if (isFolderRow) {
-                  navigatePane(side, row.relativePath);
-                } else if (row.kind === 'file' && selectionMode) {
-                  toggleSelectedPath(row.file);
-                }
-              }}
-              onDoubleClick={() => {
-                if (row.kind === 'file' || row.kind === 'previewFile') {
-                  const itemPath = row.kind === 'file' ? sidePath(row.file, side) : row.absolutePath;
-
-                  if (itemPath) {
-                    window.safetwin.showItemInFolder(itemPath).catch((openError: unknown) => {
-                      setError(toFriendlyError(openError, 'Could not open item folder.'));
-                    });
-                  }
+              role="button"
+              tabIndex={0}
+              onClick={activateRow}
+              onDoubleClick={openItemLocation}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  activateRow();
                 }
               }}
             >
@@ -1464,7 +1475,7 @@ const App = () => {
                     ? formatBytes(row.sizeBytes)
                     : ''}
               </span>
-            </button>
+            </div>
           );
         })}
 
