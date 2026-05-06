@@ -40,6 +40,8 @@ describe('ScannerService', () => {
     await writeFile(path.join(originPath, 'nested', 'conflict.txt'), 'origin', mtime);
     await writeFile(path.join(backupPath, 'nested', 'conflict.txt'), 'backup-changed', mtime);
     await writeFile(path.join(originPath, '~$draft.docx'), 'lock', mtime);
+    await writeFile(path.join(backupPath, '$RECYCLE.BIN', 'deleted.txt'), 'deleted', mtime);
+    await writeFile(path.join(backupPath, 'System Volume Information', 'tracking.log'), 'system', mtime);
 
     const db: SqliteDatabase = openDatabase(path.join(root, 'cache.sqlite'));
     initializeSchema(db);
@@ -75,6 +77,8 @@ describe('ScannerService', () => {
       expect(result.ignoredFiles).toEqual([{ path: '~$draft.docx', reason: 'Office lock file' }]);
       expect(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM file_entries')?.count).toBe(7);
       expect(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM compare_results')?.count).toBe(5);
+      expect(result.files.some((file) => file.relativePath.includes('$RECYCLE.BIN'))).toBe(false);
+      expect(result.files.some((file) => file.relativePath.includes('System Volume Information'))).toBe(false);
 
       const cached = folderPairs.getLastStatus(pair.id);
       expect(cached.lastScan?.summary.conflicts).toBe(1);

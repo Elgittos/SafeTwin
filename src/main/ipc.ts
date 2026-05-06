@@ -14,6 +14,7 @@ import { getOperationsLogPath, openDatabase } from './db/sqlite';
 import { IgnoreRuleService } from './ignore/ignoreRules';
 import { OperationLogger } from './operations/operationLogger';
 import { OperationQueueService } from './operations/operationQueueService';
+import { isProtectedWindowsDirectoryName } from './platform/protectedWindowsPaths';
 import { ScannerService } from './scanner/scannerService';
 import { FolderPairService } from './services/folderPairService';
 
@@ -54,7 +55,9 @@ export const registerIpcHandlers = async (): Promise<void> => {
     }
 
     const entries = await fs.readdir(directoryPath, { withFileTypes: true });
-    const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+    const visibleEntries = entries.filter(
+      (entry) => !entry.name.startsWith('.') && !(entry.isDirectory() && isProtectedWindowsDirectoryName(entry.name)),
+    );
 
     const previewEntries = await Promise.all(
       visibleEntries.map(async (entry) => {

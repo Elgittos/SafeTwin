@@ -4,6 +4,7 @@ import path from 'node:path';
 import { getExtension, getRelativePath, normalizeComparisonKey, toDisplayPath } from '../../shared/pathKeys';
 import type { FolderSide, LocalAvailability, ScanMode } from '../../shared/types';
 import { IgnoreRuleService } from '../ignore/ignoreRules';
+import { isProtectedWindowsDirectoryName } from '../platform/protectedWindowsPaths';
 import { getLocalAvailability } from '../platform/windowsFileAvailability';
 
 export type AvailabilityState = LocalAvailability | 'unstable';
@@ -140,6 +141,10 @@ export const walkFiles = async (
       const absolutePath = path.join(directoryPath, entry.name);
 
       if (entry.isDirectory()) {
+        if (isProtectedWindowsDirectoryName(entry.name)) {
+          continue;
+        }
+
         await visit(absolutePath);
         continue;
       }
