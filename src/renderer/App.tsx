@@ -341,13 +341,17 @@ const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>
     return true;
   }
 
-  if (row.kind === 'previewFolder' || row.kind === 'previewFile') {
+  if (row.kind === 'previewFolder') {
+    return filter === 'missing';
+  }
+
+  if (row.kind === 'previewFile') {
     return false;
   }
 
   if (row.kind === 'folder') {
     if (filter === 'missing') {
-      return row.counts.missingInBackup > 0;
+      return true;
     }
 
     if (filter === 'backupOnly') {
@@ -651,7 +655,7 @@ const App = () => {
     const savedTheme = window.localStorage.getItem('safetwin-theme');
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
-  const [filter, setFilter] = useState<FilterKey>('all');
+  const [filter, setFilter] = useState<FilterKey>('missing');
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
   const [isScanning, setIsScanning] = useState(false);
@@ -726,6 +730,23 @@ const App = () => {
     () => selectedFiles.filter((file) => file.state === 'conflictSamePathDifferentContent'),
     [selectedFiles],
   );
+  const copyReadyFiles = useMemo(() => {
+    const filesByPath = new Map<string, FileCompareItem>();
+
+    for (const file of scanResult?.files ?? []) {
+      if (file.state === 'missingInBackup') {
+        filesByPath.set(normalizePath(file.relativePath).toLowerCase(), file);
+      }
+    }
+
+    for (const row of leftRows) {
+      if (row.kind === 'file' && row.file.state === 'missingInBackup') {
+        filesByPath.set(normalizePath(row.file.relativePath).toLowerCase(), row.file);
+      }
+    }
+
+    return [...filesByPath.values()];
+  }, [leftRows, scanResult]);
   const selectedBytes = useMemo(
     () => selectedFiles.reduce((total, file) => total + file.sizeBytes, 0),
     [selectedFiles],
@@ -1255,7 +1276,15 @@ const App = () => {
     <section className="pane">
       <header className="pane-header">
         <div>
-          <strong>{side === 'origin' ? 'ORIGIN' : 'BACKUP'}</strong>
+          <strong>
+            {filter === 'missing' && side === 'origin'
+              ? 'READY TO COPY'
+              : filter === 'missing' && side === 'backup'
+                ? 'BACKUP LOCATION'
+                : side === 'origin'
+                  ? 'ORIGIN'
+                  : 'BACKUP'}
+          </strong>
           <span>{rootPath || `No ${side} folder selected`}</span>
         </div>
         <button type="button" title={`Choose ${side} folder`} onClick={() => chooseFolder(side)}>
@@ -1412,12 +1441,12 @@ const App = () => {
         <button
           type="button"
           onClick={() =>
-            createCopyQueue((scanResult?.files ?? []).filter((file) => file.state === 'missingInBackup').map((file) => file.relativePath))
+            createCopyQueue(copyReadyFiles.map((file) => file.relativePath))
           }
-          disabled={!scanResult || isPreparingOperation}
+          disabled={copyReadyFiles.length === 0 || isPreparingOperation}
         >
           <Copy size={16} aria-hidden="true" />
-          Copy Missing
+          Copy Ready
         </button>
         <button
           className={cleanupMode ? 'toolbar-active' : ''}
@@ -1493,13 +1522,10 @@ const App = () => {
       <section className="workspace-tools">
         <div className="filter-group">
           {[
-            ['all', 'Show all'],
-            ['missing', 'Show missing in backup'],
-            ['backupOnly', 'Show backup-only'],
-            ['conflicts', 'Show conflicts'],
-            ['ignored', 'Show ignored'],
-            ['skipped', 'Show skipped placeholders'],
-            ['failed', 'Show failed operations'],
+            ['missing', 'Ready to copy'],
+            ['conflicts', 'Conflicts'],
+            ['backupOnly', 'Backup-only'],
+            ['all', 'All'],
           ].map(([value, label]) => (
             <button
               className={filter === value ? 'filter-chip filter-chip-active' : 'filter-chip'}
@@ -1517,7 +1543,7 @@ const App = () => {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search filename, extension, folder, state"
+            placeholder="Search"
           />
         </div>
       </section>
@@ -1562,16 +1588,18 @@ const App = () => {
         </button>
         <button
           type="button"
-          disabled={!scanResult}
+          disabled={copyReadyFiles.length === 0}
           onClick={() =>
-            createCopyQueue((scanResult?.files ?? []).filter((file) => file.state === 'missingInBackup').map((file) => file.relativePath))
+            createCopyQueue(copyReadyFiles.map((file) => file.relativePath))
           }
         >
-          Copy all missing
+          Copy all ready
         </button>
-        <button type="button" disabled={cleanupMode || conflictSelectedFiles.length === 0} onClick={() => createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath))}>
-          Copy selected conflicts as duplicates
-        </button>
+        {filter === 'missing' ? null : (
+          <button type="button" disabled={cleanupMode || conflictSelectedFiles.length === 0} onClick={() => createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath))}>
+            Copy selected conflicts as duplicates
+          </button>
+        )}
         {cleanupMode ? (
           <>
             <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
