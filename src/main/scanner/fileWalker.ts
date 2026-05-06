@@ -53,6 +53,11 @@ const delay = (milliseconds: number): Promise<void> =>
     setTimeout(resolve, milliseconds);
   });
 
+const yieldToEventLoop = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
 const isStable = async (filePath: string): Promise<boolean> => {
   const first = await fs.stat(filePath);
   await delay(75);
@@ -108,6 +113,7 @@ export const walkFiles = async (
   const skippedFiles: ScannedFile[] = [];
   let foldersDiscovered = 0;
   let lastProgressAt = 0;
+  let entriesVisited = 0;
 
   const reportProgress = (currentPath: string, force = false): void => {
     const now = Date.now();
@@ -139,6 +145,12 @@ export const walkFiles = async (
     }
 
     for (const entry of entries) {
+      entriesVisited += 1;
+
+      if (entriesVisited % 200 === 0) {
+        await yieldToEventLoop();
+      }
+
       const absolutePath = path.join(directoryPath, entry.name);
 
       if (entry.isDirectory()) {

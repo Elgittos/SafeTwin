@@ -12,6 +12,11 @@ export interface ScanOptions {
   onProgress?: ScanProgressCallback;
 }
 
+const yieldToEventLoop = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
 export class ScannerService {
   private readonly repository: ScanRepository;
 
@@ -76,8 +81,18 @@ export class ScannerService {
     const scannedFiles = [...originWalk.files, ...backupWalk.files, ...ignoredFiles, ...skippedFiles];
     const entryIds = new Map<ScannedFile, number>();
 
-    for (const file of scannedFiles) {
+    for (const [index, file] of scannedFiles.entries()) {
       entryIds.set(file, this.repository.insertFileEntry(scanRunId, file));
+
+      if (index > 0 && index % 250 === 0) {
+        emitProgress('caching', 'both', `Writing scan cache: ${index}/${scannedFiles.length} entries`, {
+          filesDiscovered: index,
+          foldersDiscovered: originWalk.foldersDiscovered + backupWalk.foldersDiscovered,
+          ignored: ignoredFiles.length,
+          skipped: skippedFiles.length,
+        });
+        await yieldToEventLoop();
+      }
     }
 
     emitProgress('comparing', 'both', 'Comparing folders', {
@@ -94,15 +109,27 @@ export class ScannerService {
       skippedFiles,
     });
 
-    for (const item of comparison.files) {
-      const origin = scannedFiles.find((file) => file.absolutePath === item.originPath) ?? null;
-      const backup = scannedFiles.find((file) => file.absolutePath === item.backupPath) ?? null;
+    const scannedByAbsolutePath = new Map(scannedFiles.map((file) => [file.absolutePath, file]));
+
+    for (const [index, item] of comparison.files.entries()) {
+      const origin = item.originPath ? scannedByAbsolutePath.get(item.originPath) ?? null : null;
+      const backup = item.backupPath ? scannedByAbsolutePath.get(item.backupPath) ?? null : null;
       this.repository.insertCompareResult(
         scanRunId,
         item,
         origin ? entryIds.get(origin) ?? null : null,
         backup ? entryIds.get(backup) ?? null : null,
       );
+
+      if (index > 0 && index % 250 === 0) {
+        emitProgress('comparing', 'both', `Saving comparison: ${index}/${comparison.files.length} results`, {
+          filesDiscovered: index,
+          foldersDiscovered: originWalk.foldersDiscovered + backupWalk.foldersDiscovered,
+          ignored: ignoredFiles.length,
+          skipped: skippedFiles.length,
+        });
+        await yieldToEventLoop();
+      }
     }
 
     const result: ScanResult = {

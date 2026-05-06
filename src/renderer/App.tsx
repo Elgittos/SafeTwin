@@ -750,7 +750,7 @@ const App = () => {
     }
   };
 
-  const loadPairState = async (pair: FolderPair, scanIfMissing = false) => {
+  const loadPairState = async (pair: FolderPair) => {
     setActivePairId(pair.id);
     setOriginPath(pair.originPath);
     setBackupPath(pair.backupPath);
@@ -770,9 +770,6 @@ const App = () => {
     setOperation(operations[0] ?? null);
     setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
 
-    if (!status.lastScan && scanIfMissing) {
-      await scanSavedPair(pair);
-    }
   };
 
   const loadPairs = async () => {
@@ -780,7 +777,7 @@ const App = () => {
     setPairs(nextPairs);
 
     if (!activePairId && nextPairs.length > 0) {
-      await loadPairState(nextPairs[0], true);
+      await loadPairState(nextPairs[0]);
     }
   };
 
@@ -910,10 +907,9 @@ const App = () => {
 
     if (nextOriginPath && nextBackupPath) {
       try {
-        const savedPair = await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
-        await scanSavedPair(savedPair);
+        await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
       } catch (folderError) {
-        setError(toFriendlyError(folderError, 'Could not scan selected folders.'));
+        setError(toFriendlyError(folderError, 'Could not save selected folders.'));
       }
     }
   };
@@ -940,8 +936,7 @@ const App = () => {
     setError(null);
 
     try {
-      const savedPair = await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
-      await scanSavedPair(savedPair);
+      await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
     } catch (swapError) {
       setError(toFriendlyError(swapError, 'Could not swap origin and backup.'));
     }

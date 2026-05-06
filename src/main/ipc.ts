@@ -18,6 +18,11 @@ import { isProtectedWindowsDirectoryName } from './platform/protectedWindowsPath
 import { ScannerService } from './scanner/scannerService';
 import { FolderPairService } from './services/folderPairService';
 
+const yieldToEventLoop = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
 export const registerIpcHandlers = async (): Promise<void> => {
   const db = openDatabase();
   initializeSchema(db);
@@ -59,32 +64,36 @@ export const registerIpcHandlers = async (): Promise<void> => {
       (entry) => !entry.name.startsWith('.') && !(entry.isDirectory() && isProtectedWindowsDirectoryName(entry.name)),
     );
 
-    const previewEntries = await Promise.all(
-      visibleEntries.map(async (entry) => {
-        const entryRelativePath = normalizedRelativePath
-          ? `${normalizedRelativePath}/${entry.name}`
-          : entry.name;
-        const absolutePath = path.join(directoryPath, entry.name);
-        const kind = entry.isDirectory() ? 'folder' : 'file';
-        let sizeBytes = 0;
+    const previewEntries = [];
 
-        if (kind === 'file') {
-          try {
-            sizeBytes = (await fs.stat(absolutePath)).size;
-          } catch {
-            sizeBytes = 0;
-          }
+    for (const [index, entry] of visibleEntries.entries()) {
+      if (index > 0 && index % 200 === 0) {
+        await yieldToEventLoop();
+      }
+
+      const entryRelativePath = normalizedRelativePath
+        ? `${normalizedRelativePath}/${entry.name}`
+        : entry.name;
+      const absolutePath = path.join(directoryPath, entry.name);
+      const kind = entry.isDirectory() ? 'folder' : 'file';
+      let sizeBytes = 0;
+
+      if (kind === 'file') {
+        try {
+          sizeBytes = (await fs.stat(absolutePath)).size;
+        } catch {
+          sizeBytes = 0;
         }
+      }
 
-        return {
-          name: entry.name,
-          relativePath: entryRelativePath.replaceAll('\\', '/'),
-          absolutePath,
-          kind,
-          sizeBytes,
-        };
-      }),
-    );
+      previewEntries.push({
+        name: entry.name,
+        relativePath: entryRelativePath.replaceAll('\\', '/'),
+        absolutePath,
+        kind,
+        sizeBytes,
+      });
+    }
 
     return previewEntries.sort((left, right) => {
       if (left.kind !== right.kind) {
