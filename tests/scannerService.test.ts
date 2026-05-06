@@ -85,6 +85,14 @@ describe('ScannerService', () => {
       expect(cached.lastScan?.files.find((file) => file.relativePath.includes('conflict'))?.state).toBe(
         'conflictSamePathDifferentContent',
       );
+      expect(folderPairs.getLastFolderPair()?.id).toBe(pair.id);
+
+      const newerPair = folderPairs.saveFolderPair({
+        name: 'Newer remembered folders',
+        originPath: path.join(root, 'new-origin'),
+        backupPath: path.join(root, 'new-recipient'),
+      });
+      expect(folderPairs.getLastFolderPair()?.id).toBe(newerPair.id);
     } finally {
       db.close();
     }

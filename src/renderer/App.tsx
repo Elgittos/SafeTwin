@@ -56,7 +56,7 @@ type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 's
 type CopyAction = 'copyMissing' | 'copyConflictDuplicate';
 
 const filterOptions: Array<[FilterKey, string]> = [
-  ['missing', 'Missing from backup'],
+  ['missing', 'Missing from recipient'],
   ['conflicts', 'Conflicts'],
   ['backupOnly', 'Backup-only'],
   ['ignored', 'Ignored'],
@@ -64,6 +64,8 @@ const filterOptions: Array<[FilterKey, string]> = [
   ['failed', 'Failed'],
   ['all', 'All'],
 ];
+
+const showAdvancedControls = false;
 
 interface CopyPreview {
   filesSelected: number;
@@ -185,7 +187,7 @@ const toFriendlyError = (error: unknown, fallback: string): string => {
   }
 
   if (message.includes('enospc') || message.includes('not enough') || message.includes('disk full')) {
-    return `${fallback} The backup drive does not have enough free space. ${rawMessage}`;
+    return `${fallback} The recipient drive does not have enough free space. ${rawMessage}`;
   }
 
   if (message.includes('hash') || message.includes('verification') || message.includes('mismatch')) {
@@ -225,7 +227,7 @@ const extension = (relativePath: string): string => {
 
 const getDefaultPairName = (originPath: string, backupPath: string): string => {
   const origin = originPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Origin';
-  const backup = backupPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Backup';
+  const backup = backupPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Recipient';
   return `${origin} to ${backup}`;
 };
 
@@ -293,7 +295,7 @@ const createLiveCompareItem = (
       originPath: side === 'origin' ? entry.absolutePath : null,
       backupPath: side === 'backup' ? entry.absolutePath : null,
       sizeBytes: entry.sizeBytes,
-      reason: side === 'origin' ? 'Visible in origin but not in backup' : 'Visible in backup but not in origin',
+      reason: side === 'origin' ? 'Visible in origin but not in recipient' : 'Visible in recipient but not in origin',
     };
   }
 
@@ -312,7 +314,7 @@ const createLiveCompareItem = (
 
 const stateLabel = (file: FileCompareItem): string => {
   if (file.state === 'missingInBackup') {
-    return 'missing in backup ready to copy';
+    return 'missing in recipient ready to copy';
   }
 
   if (file.state === 'backupOnly') {
@@ -451,7 +453,7 @@ const matchesSearch = (row: PaneRow, query: string): boolean => {
       : row.kind === 'previewFile'
         ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} file`
         : row.kind === 'missingPlaceholder'
-          ? `${row.name} ${row.displayPath} missing in backup`
+          ? `${row.name} ${row.displayPath} missing in recipient`
           : `${row.name} ${row.displayPath} missing backup-only conflict ignored skipped folder`;
 
   return corpus.toLowerCase().includes(trimmed);
@@ -607,7 +609,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
 
   if (row.kind === 'missingPlaceholder') {
     return (
-      <span className="indicator indicator-plus" title="Missing in backup">
+      <span className="indicator indicator-plus" title="Missing in recipient">
         <Plus size={15} aria-hidden="true" />
       </span>
     );
@@ -624,7 +626,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
           <span
             className="badge badge-plus"
             title={samplesTitle(
-              `Origin-only files inside this folder`,
+              `Files missing from recipient inside this folder`,
               row.counts.missingInBackup,
               row.samples?.missingInBackup,
             )}
@@ -698,7 +700,7 @@ const indicatorFor = (row: PaneRow, side: PaneSide) => {
 
   if (row.file.state === 'missingInBackup') {
     return (
-      <span className="indicator indicator-plus" title="Missing from backup">
+      <span className="indicator indicator-plus" title="Missing from recipient">
         <Plus size={15} aria-hidden="true" />
       </span>
     );
@@ -781,7 +783,7 @@ const App = () => {
     const savedTheme = window.localStorage.getItem('safetwin-theme');
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
-  const [filter, setFilter] = useState<FilterKey>('all');
+  const [filter, setFilter] = useState<FilterKey>('missing');
   const [search, setSearch] = useState('');
   const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
   const [isScanning, setIsScanning] = useState(false);
@@ -944,7 +946,7 @@ const App = () => {
     nextPairName: string,
   ): Promise<FolderPair> => {
     if (!nextOriginPath || !nextBackupPath) {
-      throw new Error('Choose both an origin folder and a backup folder.');
+      throw new Error('Choose both an origin folder and a recipient folder.');
     }
 
     const input: SaveFolderPairInput = {
@@ -965,7 +967,7 @@ const App = () => {
     return savedPair;
   };
 
-  const scanSavedPair = async (pair: FolderPair, mode: ScanMode = 'metadata') => {
+  const scanSavedPair = async (pair: FolderPair, mode: ScanMode = 'metadata'): Promise<ScanResult | null> => {
     setIsScanning(true);
     setError(null);
     setScanProgress({
@@ -991,16 +993,53 @@ const App = () => {
       setPairs([{ ...pair, lastScanAt: result.completedAt }]);
       setActivePairId(pair.id);
       setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
+      return result;
     } catch (scanError) {
       setError(toFriendlyError(scanError, 'Scan failed.'));
+      return null;
     } finally {
       setIsScanning(false);
       window.setTimeout(() => setScanProgress(null), 1400);
     }
   };
 
+  const loadRememberedFolders = async () => {
+    const rememberedPair = await window.safetwin.getLastFolderPair();
+
+    if (!rememberedPair) {
+      return;
+    }
+
+    setPairs([rememberedPair]);
+    setActivePairId(rememberedPair.id);
+    setOriginPath(rememberedPair.originPath);
+    setBackupPath(rememberedPair.backupPath);
+    setPairName(rememberedPair.name);
+    setLeftPath('');
+    setRightPath('');
+    setSelectedPaths([]);
+    setSelectedFolderPaths([]);
+    setCopyPreview(null);
+    setCleanupPreview(null);
+    setError(null);
+
+    const [status, operations, ignored] = await Promise.all([
+      window.safetwin.getLastStatus(rememberedPair.id),
+      window.safetwin.listOperations(rememberedPair.id),
+      window.safetwin.getIgnoredFiles(rememberedPair.id),
+    ]);
+
+    setPairs([status.folderPair]);
+    setScanResult(status.lastScan);
+    setOperationHistory(operations);
+    setOperation(
+      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
+    );
+    setIgnoredFiles(ignored);
+  };
+
   useEffect(() => {
-    window.safetwin.listIgnoreRules().then(setIgnoreRules).catch((loadError: unknown) => {
+    Promise.all([window.safetwin.listIgnoreRules().then(setIgnoreRules), loadRememberedFolders()]).catch((loadError: unknown) => {
       setError(toFriendlyError(loadError, 'Could not load SafeTwin data.'));
     });
   }, []);
@@ -1060,7 +1099,7 @@ const App = () => {
       .catch((previewError: unknown) => {
         if (!canceled) {
           setBackupPreviewEntries([]);
-          setError(toFriendlyError(previewError, 'Could not read backup folder.'));
+          setError(toFriendlyError(previewError, 'Could not read recipient folder.'));
         }
       });
 
@@ -1135,7 +1174,7 @@ const App = () => {
 
   const swapRoles = async () => {
     if (!originPath || !backupPath) {
-      setError('Choose both an origin folder and a backup folder before swapping roles.');
+      setError('Choose both an origin folder and a recipient folder before swapping roles.');
       return;
     }
 
@@ -1297,18 +1336,13 @@ const App = () => {
     await scanSavedPair(savedPair);
   };
 
-  const createCopyQueue = async (paths: string[], folderPaths: string[] = []) => {
-    if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
-      return;
-    }
-
+  const startCopyOperation = async (folderPairId: number, paths: string[], folderPaths: string[]) => {
     setIsPreparingOperation(true);
     setError(null);
 
     try {
-      await ensureScanIncludesSelection(paths, folderPaths);
       const nextOperation = await window.safetwin.createCopyOperation({
-        folderPairId: activePairId,
+        folderPairId,
         selectedRelativePaths: paths,
         selectedFolderPaths: folderPaths,
         verificationLevel,
@@ -1332,6 +1366,49 @@ const App = () => {
       setIsPreparingOperation(false);
     }
   };
+
+  const createCopyQueue = async (paths: string[], folderPaths: string[] = []) => {
+    if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
+      return;
+    }
+
+    if (!scanResult) {
+      setError('Run Scan once to build the missing-files list. SafeTwin will reuse that cached scan after that.');
+      return;
+    }
+
+    await startCopyOperation(activePairId, paths, folderPaths);
+  };
+
+  const copyMissingHere = () => {
+    void createCopyQueue([], [leftPath]);
+  };
+
+  const backupMissingNow = async () => {
+    if (!originPath || !backupPath) {
+      setError('Choose an Origin folder and a Recipient folder first.');
+      return;
+    }
+
+    try {
+      const savedPair = await savePair();
+      const currentScan = scanResult ?? (await scanSavedPair(savedPair));
+
+      if (!currentScan) {
+        return;
+      }
+
+      if (currentScan.summary.missingInBackup === 0) {
+        setError('No missing files to copy from the last scan.');
+        return;
+      }
+
+      await startCopyOperation(savedPair.id, [], ['']);
+    } catch (backupError) {
+      setError(toFriendlyError(backupError, 'Could not back up missing files.'));
+    }
+  };
+
 
   const createSingleCopyQueue = async (relativePath: string, action: CopyAction) => {
     if (!activePairId) {
@@ -1489,14 +1566,14 @@ const App = () => {
         <div>
           <strong>
             {filter === 'missing' && side === 'origin'
-              ? 'MISSING FROM BACKUP'
+              ? 'MISSING FROM RECIPIENT'
               : filter === 'missing' && side === 'backup'
-                ? 'BACKUP TARGET'
+                ? 'RECIPIENT TARGET'
                 : side === 'origin'
                   ? 'ORIGIN'
-                  : 'BACKUP'}
+                  : 'RECIPIENT'}
           </strong>
-          <span>{rootPath || `No ${side} folder selected`}</span>
+          <span>{rootPath || `No ${side === 'origin' ? 'origin' : 'recipient'} folder selected`}</span>
         </div>
         <button type="button" title={`Choose ${side} folder`} onClick={() => chooseFolder(side)}>
           <FolderOpen size={16} aria-hidden="true" />
@@ -1534,7 +1611,7 @@ const App = () => {
               ? 'Copy duplicate'
               : side === 'backup'
                 ? 'Copy here'
-                : 'Copy to backup';
+                : 'Copy to recipient';
           const rowClasses = ['explorer-row'];
 
           if (selected || folderSelected) {
@@ -1620,7 +1697,7 @@ const App = () => {
                 {copyPath && copyAction ? (
                   <button
                     type="button"
-                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Backup' : 'Copy this Origin file to Backup'}
+                    title={row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent' ? 'Copy this Origin file as a duplicate in Recipient' : 'Copy this Origin file to Recipient'}
                     disabled={isPreparingOperation || copyDisabledByOperation}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1661,70 +1738,87 @@ const App = () => {
         <aside className="side-menu">
           <div className="side-brand">
             <h1>SafeTwin</h1>
-            <span>Origin -&gt; Backup</span>
+            <span>Origin -&gt; Recipient</span>
           </div>
 
           <section className="side-section">
             <h2>Actions</h2>
+            <button type="button" onClick={backupMissingNow} disabled={!originPath || !backupPath || isScanning || isPreparingOperation}>
+              {isPreparingOperation ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+              Copy missing now
+            </button>
             <button type="button" onClick={() => scan()} disabled={isScanning}>
               {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
-              Scan
+              Scan only
             </button>
-            <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
-              <HardDrive size={16} aria-hidden="true" />
-              Deep Scan
-            </button>
-            <button
-              type="button"
-              onClick={() => createCopyQueue([], [leftPath])}
-              disabled={statusSummary.missingInBackup === 0 || isPreparingOperation}
-            >
-              <Copy size={16} aria-hidden="true" />
-              Copy missing here
-            </button>
-            <button
-              className={selectionMode ? 'toolbar-active' : ''}
-              type="button"
-              onClick={() => {
-                setSelectionMode((current) => !current);
-                setSelectedPaths([]);
-                setSelectedFolderPaths([]);
-                setCleanupPreview(null);
-              }}
-            >
-              <CheckSquare size={16} aria-hidden="true" />
-              Select
-            </button>
-            <button
-              className={cleanupMode ? 'toolbar-active' : ''}
-              type="button"
-              onClick={toggleCleanupMode}
-            >
-              <Trash2 size={16} aria-hidden="true" />
-              Cleanup Mode
-            </button>
-            <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
-              <Settings size={16} aria-hidden="true" />
-              Settings
-            </button>
+            {showAdvancedControls ? (
+              <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
+                <HardDrive size={16} aria-hidden="true" />
+                Deep Scan
+              </button>
+            ) : null}
+            {showAdvancedControls ? (
+              <>
+                <button
+                  type="button"
+                  onClick={copyMissingHere}
+                  disabled={!scanResult || statusSummary.missingInBackup === 0 || isPreparingOperation}
+                >
+                  <Copy size={16} aria-hidden="true" />
+                  Copy all missing here
+                </button>
+                <button
+                  className={selectionMode ? 'toolbar-active' : ''}
+                  type="button"
+                  onClick={() => {
+                    setSelectionMode((current) => !current);
+                    setSelectedPaths([]);
+                    setSelectedFolderPaths([]);
+                    setCleanupPreview(null);
+                  }}
+                >
+                  <CheckSquare size={16} aria-hidden="true" />
+                  Select
+                </button>
+              </>
+            ) : null}
+            {showAdvancedControls ? (
+              <>
+                <button
+                  className={cleanupMode ? 'toolbar-active' : ''}
+                  type="button"
+                  onClick={toggleCleanupMode}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                  Cleanup Mode
+                </button>
+                <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
+                  <Settings size={16} aria-hidden="true" />
+                  Settings
+                </button>
+              </>
+            ) : null}
           </section>
 
+          {showAdvancedControls ? (
           <section className="side-section">
-            <h2>View</h2>
-            <label className="compact-field">
-              Filter
-              <select
-                aria-label="View filter"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value as FilterKey)}
-              >
-                {filterOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <h2>Find</h2>
+            {showAdvancedControls ? (
+              <label className="compact-field">
+                Filter
+                <select
+                  aria-label="View filter"
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value as FilterKey)}
+                >
+                  {filterOptions.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="search-box">
               <Search size={15} aria-hidden="true" />
               <input
@@ -1733,18 +1827,20 @@ const App = () => {
                 placeholder="Search"
               />
             </div>
-            <label className="compact-field">
-              Verify
-              <select
-                aria-label="Verification level"
-                value={verificationLevel}
-                onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
-              >
-                <option value="auto">Auto</option>
-                <option value="basic">Size</option>
-                <option value="strong">Hash</option>
-              </select>
-            </label>
+            {showAdvancedControls ? (
+              <label className="compact-field">
+                Verify
+                <select
+                  aria-label="Verification level"
+                  value={verificationLevel}
+                  onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="basic">Size</option>
+                  <option value="strong">Hash</option>
+                </select>
+              </label>
+            ) : null}
             <label className="mirror-toggle">
               <input
                 type="checkbox"
@@ -1755,7 +1851,9 @@ const App = () => {
               Mirror navigation
             </label>
           </section>
+          ) : null}
 
+          {showAdvancedControls ? (
           <section className="side-section">
             <h2>Selection</h2>
             <span className="selection-summary">
@@ -1768,7 +1866,13 @@ const App = () => {
             >
               Copy selected
             </button>
-            {cleanupMode ? (
+            <button type="button" onClick={selectVisibleEligible}>
+              Select visible
+            </button>
+            <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
+              Clear
+            </button>
+            {showAdvancedControls && cleanupMode ? (
               <>
                 <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
                   Cleanup preview
@@ -1778,29 +1882,29 @@ const App = () => {
                 </button>
               </>
             ) : null}
-            <select
-              aria-label="More actions"
-              className="action-menu"
-              value=""
-              onChange={(event) => {
-                runMoreAction(event.target.value);
-                event.target.value = '';
-              }}
-            >
-              <option value="">More actions</option>
-              <option value="swap" disabled={!originPath || !backupPath || isScanning}>
-                Swap roles
-              </option>
-              <option value="selectVisible">Select visible</option>
-              <option value="clearSelection" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0}>
-                Clear selection
-              </option>
-              <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
-                Copy selected conflicts
-              </option>
-            </select>
+            {showAdvancedControls ? (
+              <select
+                aria-label="More actions"
+                className="action-menu"
+                value=""
+                onChange={(event) => {
+                  runMoreAction(event.target.value);
+                  event.target.value = '';
+                }}
+              >
+                <option value="">More actions</option>
+                <option value="swap" disabled={!originPath || !backupPath || isScanning}>
+                  Swap roles
+                </option>
+                <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
+                  Copy selected conflicts
+                </option>
+              </select>
+            ) : null}
           </section>
+          ) : null}
 
+          {showAdvancedControls ? (
           <section className="side-section side-theme">
             <button type="button" title="Light theme" onClick={() => setTheme('light')}>
               <Sun size={16} aria-hidden="true" />
@@ -1811,25 +1915,30 @@ const App = () => {
               Dark
             </button>
           </section>
+          ) : null}
         </aside>
 
         <section className="main-workspace">
           <section className="status-strip">
         <span>Last scan: {formatDate(activePair?.lastScanAt ?? null)}</span>
         <span>Last copy: {formatDate(lastCopyAt)}</span>
-        <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
         <span>
-          Missing in backup: {statusSummary.missingInBackup} files / {formatBytes(statusSummary.totalMissingSize)}
+          Missing in recipient: {statusSummary.missingInBackup} files / {formatBytes(statusSummary.totalMissingSize)}
         </span>
-        <span>
-          Backup-only: {statusSummary.backupOnly} files / {formatBytes(statusSummary.totalBackupOnlySize)}
-        </span>
-        <span>Conflicts: {statusSummary.conflicts}</span>
-        <span>Ignored: {statusSummary.ignored}</span>
-        <span>Skipped: {skippedCount(statusSummary)}</span>
+        {showAdvancedControls ? (
+          <>
+            <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
+            <span>
+              Backup-only: {statusSummary.backupOnly} files / {formatBytes(statusSummary.totalBackupOnlySize)}
+            </span>
+            <span>Conflicts: {statusSummary.conflicts}</span>
+            <span>Ignored: {statusSummary.ignored}</span>
+            <span>Skipped: {skippedCount(statusSummary)}</span>
+          </>
+        ) : null}
       </section>
 
-      {reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
+      {showAdvancedControls && reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
 
       {scanProgress ? (
         <section className="scan-progress">
@@ -1858,13 +1967,13 @@ const App = () => {
         <section className="operation-preview">
           <strong>Copy preview</strong>
           <span>Files selected: {copyPreview.filesSelected}</span>
-          <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span>
+          {showAdvancedControls ? <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span> : null}
           <span>Total size: {formatBytes(copyPreview.totalSize)}</span>
-          <span>Action: copy Origin to Backup; existing Backup files stay preserved</span>
+          <span>Action: copy Origin to Recipient; existing Recipient files stay preserved</span>
         </section>
       ) : null}
 
-      {cleanupPreview ? (
+      {showAdvancedControls && cleanupPreview ? (
         <section className="cleanup-preview">
           <strong>Cleanup preview</strong>
           <span>Files selected: {cleanupPreview.filesSelected}</span>
@@ -1880,7 +1989,7 @@ const App = () => {
         {renderPane('backup', rightRows, rightPath, backupPath)}
       </section>
 
-      {settingsOpen ? (
+      {showAdvancedControls && settingsOpen ? (
         <aside className="settings-panel">
           <header>
             <strong>Settings</strong>
@@ -1996,7 +2105,7 @@ const App = () => {
                 </button>
                 <button
                   type="button"
-                  title="Open backup folder"
+                  title="Open recipient folder"
                   disabled={!item.destinationPath}
                   onClick={() => item.destinationPath && window.safetwin.showItemInFolder(item.destinationPath)}
                 >

@@ -58,6 +58,10 @@ export class FolderPairService {
       .map(toFolderPair);
   }
 
+  getLastFolderPair(): FolderPair | null {
+    return this.listFolderPairs()[0] ?? null;
+  }
+
   getFolderPair(id: number): FolderPair {
     const row = this.db.get<FolderPairRow>(
       `SELECT id, name, origin_path, backup_path, mirror_navigation_enabled,
