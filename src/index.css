@@ -42,14 +42,117 @@ input:disabled {
 }
 
 .app-frame {
-  display: flex;
-  flex-direction: column;
+  display: block;
   min-width: 0;
   height: 100vh;
   min-height: 0;
   overflow: hidden;
   color: #1f2937;
   background: #eef2f6;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.side-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 12px;
+  border-right: 1px solid #d4dbe5;
+  background: #f8fafc;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.theme-dark .side-menu {
+  border-color: #2b3443;
+  background: #111823;
+}
+
+.main-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.side-brand {
+  display: grid;
+  gap: 2px;
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid #dce3ec;
+}
+
+.theme-dark .side-brand {
+  border-color: #2b3443;
+}
+
+.side-brand h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.side-brand span,
+.side-section h2 {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.theme-dark .side-brand span,
+.theme-dark .side-section h2 {
+  color: #9aa6b8;
+}
+
+.side-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  min-width: 0;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.side-section > * {
+  min-width: 0;
+}
+
+.theme-dark .side-section {
+  border-color: #263244;
+  background: #151d29;
+}
+
+.side-section h2 {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.side-menu button {
+  width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-theme {
+  grid-template-columns: 1fr 1fr;
+  margin-top: auto;
+}
+
+.side-theme button {
+  justify-content: center;
 }
 
 .theme-dark {
@@ -133,6 +236,7 @@ select {
 
 .theme-switch button,
 .toolbar button,
+.side-menu button,
 .filter-chip,
 .selection-bar button,
 .drawer-actions button,
@@ -155,6 +259,7 @@ select {
 
 .theme-dark .theme-switch button,
 .theme-dark .toolbar button,
+.theme-dark .side-menu button,
 .theme-dark .filter-chip,
 .theme-dark .selection-bar button,
 .theme-dark .drawer-actions button,
@@ -179,6 +284,7 @@ select {
 }
 
 .toolbar .toolbar-active,
+.side-menu .toolbar-active,
 .filter-chip-active {
   color: #ffffff;
   border-color: #1f7a5f;
@@ -193,6 +299,10 @@ select {
   color: #445166;
   font-size: 13px;
   font-weight: 650;
+}
+
+.side-menu .mirror-toggle {
+  margin-left: 0;
 }
 
 .theme-dark .mirror-toggle {
@@ -212,13 +322,13 @@ select {
 .status-strip {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
-  min-height: 26px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 4px 12px;
   border-bottom: 1px solid #dce3ec;
   background: #ffffff;
-  white-space: nowrap;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .theme-dark .status-strip {
@@ -286,7 +396,7 @@ select {
   border-bottom: 1px solid #d4dbe5;
   background: #f8fafc;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .theme-dark .workspace-tools {
@@ -348,7 +458,7 @@ select {
 }
 
 .action-menu {
-  width: 112px;
+  width: 100%;
   min-height: 28px;
   font-weight: 650;
 }
@@ -363,8 +473,19 @@ select {
   font-weight: 650;
 }
 
+.side-menu .compact-field {
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+}
+
 .compact-field select {
   width: 132px;
+}
+
+.side-menu .compact-field select {
+  width: 140px;
+  min-width: 0;
 }
 
 .selection-summary,

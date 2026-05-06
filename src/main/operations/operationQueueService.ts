@@ -35,6 +35,10 @@ const isInsideSelectedFolder = (file: FileCompareItem, selectedFolderPaths: stri
   const displayPath = file.displayPath.replaceAll('\\', '/');
   return selectedFolderPaths.some((folderPath) => {
     const normalizedFolder = folderPath.replaceAll('\\', '/').replace(/\/+$/, '');
+    if (normalizedFolder === '') {
+      return true;
+    }
+
     return displayPath === normalizedFolder || displayPath.startsWith(`${normalizedFolder}/`);
   });
 };

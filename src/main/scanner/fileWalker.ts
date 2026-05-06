@@ -46,6 +46,7 @@ export interface WalkProgress {
 export interface WalkOptions {
   mode: ScanMode;
   onProgress?: (progress: WalkProgress) => void;
+  startRelativePath?: string;
 }
 
 const delay = (milliseconds: number): Promise<void> =>
@@ -132,6 +133,15 @@ export const walkFiles = async (
       skipped: skippedFiles.length,
     });
   };
+
+  const normalizedStartRelativePath = options.startRelativePath?.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '') ?? '';
+  const startPath = path.resolve(rootPath, normalizedStartRelativePath);
+  const resolvedRoot = path.resolve(rootPath);
+  const relativeFromRoot = path.relative(resolvedRoot, startPath);
+
+  if (relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+    throw new Error('Scan path is outside the selected folder.');
+  }
 
   const visit = async (directoryPath: string): Promise<void> => {
     let entries: Dirent[];
@@ -230,8 +240,8 @@ export const walkFiles = async (
     }
   };
 
-  await visit(rootPath);
-  reportProgress(rootPath, true);
+  await visit(startPath);
+  reportProgress(startPath, true);
 
   return {
     files,

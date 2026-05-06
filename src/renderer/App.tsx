@@ -352,6 +352,10 @@ const isInsideSelectedFolderPath = (file: FileCompareItem, folderPaths: string[]
 
   return folderPaths.some((folderPath) => {
     const normalizedFolder = normalizePath(folderPath).toLowerCase();
+    if (normalizedFolder === '') {
+      return true;
+    }
+
     return displayPath === normalizedFolder || displayPath.startsWith(`${normalizedFolder}/`);
   });
 };
@@ -838,23 +842,6 @@ const App = () => {
     () => selectedFiles.filter((file) => file.state === 'conflictSamePathDifferentContent'),
     [selectedFiles],
   );
-  const copyReadyFiles = useMemo(() => {
-    const filesByPath = new Map<string, FileCompareItem>();
-
-    for (const file of scanResult?.files ?? []) {
-      if (file.state === 'missingInBackup') {
-        filesByPath.set(normalizePath(file.relativePath).toLowerCase(), file);
-      }
-    }
-
-    for (const row of leftRows) {
-      if (row.kind === 'file' && row.file.state === 'missingInBackup') {
-        filesByPath.set(normalizePath(row.file.relativePath).toLowerCase(), row.file);
-      }
-    }
-
-    return [...filesByPath.values()];
-  }, [leftRows, scanResult]);
   const selectedBytes = useMemo(
     () => selectedFiles.reduce((total, file) => total + file.sizeBytes, 0),
     [selectedFiles],
@@ -1273,15 +1260,21 @@ const App = () => {
 
   const selectVisibleEligible = () => {
     const paths = new Set(selectedPaths);
+    const folderPaths = new Set(selectedFolderPaths);
 
     for (const row of [...leftRows, ...rightRows]) {
       if (row.kind === 'file' && rowIsSelectable(row)) {
         paths.add(row.file.relativePath);
       }
+
+      if (row.kind === 'folder' && rowIsSelectable(row)) {
+        folderPaths.add(row.relativePath);
+      }
     }
 
     setSelectionMode(true);
     setSelectedPaths([...paths]);
+    setSelectedFolderPaths([...folderPaths]);
     setCleanupPreview(null);
     setCopyPreview(null);
   };
@@ -1326,8 +1319,12 @@ const App = () => {
         selectedFolderPaths: folderPaths,
         verificationLevel,
       });
-      setOperation(nextOperation);
-      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
+      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
+      setOperation(startedOperation);
+      setOperationHistory((current) => [
+        startedOperation,
+        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
+      ]);
       setCopyPreview({
         filesSelected: nextOperation.totals.totalItems,
         conflictsSelected: nextOperation.items.filter((item) => item.action === 'copyConflictDuplicate').length,
@@ -1383,8 +1380,12 @@ const App = () => {
         selectedRelativePaths: cleanupSelectedFiles.map((file) => file.relativePath),
         selectedFolderPaths,
       });
-      setOperation(nextOperation);
-      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
+      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
+      setOperation(startedOperation);
+      setOperationHistory((current) => [
+        startedOperation,
+        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
+      ]);
       setCopyPreview(null);
       setCleanupPreview(null);
     } catch (operationError) {
@@ -1400,7 +1401,7 @@ const App = () => {
     }
 
     try {
-      const nextOperation =
+      let nextOperation =
         command === 'start'
           ? await window.safetwin.startOperation(operation.operation.id)
           : command === 'pause'
@@ -1410,6 +1411,11 @@ const App = () => {
               : command === 'cancel'
                 ? await window.safetwin.cancelOperation(operation.operation.id)
                 : await window.safetwin.retryFailedOperation(operation.operation.id);
+
+      if (command === 'retry') {
+        nextOperation = await window.safetwin.startOperation(nextOperation.operation.id);
+      }
+
       setOperation(nextOperation);
       setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
     } catch (commandError) {
@@ -1583,134 +1589,200 @@ const App = () => {
 
   return (
     <main className={`app-frame theme-${theme}`}>
-      <header className="app-topbar">
-        <div className="title-block">
-          <h1>SafeTwin</h1>
-          <span>Folder pair: Origin -&gt; Backup</span>
-        </div>
+      <div className="app-shell">
+        <aside className="side-menu">
+          <div className="side-brand">
+            <h1>SafeTwin</h1>
+            <span>Origin -&gt; Backup</span>
+          </div>
 
-        <div className="pair-controls">
-          <select
-            aria-label="Folder pair"
-            value={activePairId ?? ''}
-            onChange={(event) => {
-              const pair = pairs.find((item) => item.id === Number(event.target.value));
+          <section className="side-section">
+            <h2>Folder pair</h2>
+            <select
+              aria-label="Folder pair"
+              value={activePairId ?? ''}
+              onChange={(event) => {
+                const pair = pairs.find((item) => item.id === Number(event.target.value));
 
-              if (pair) {
-                loadPairState(pair).catch((loadError: unknown) => {
-                  setError(toFriendlyError(loadError, 'Could not load folder pair.'));
-                });
-              }
-            }}
-          >
-            <option value="">New folder pair</option>
-            {pairs.map((pair) => (
-              <option key={pair.id} value={pair.id}>
-                {pair.name}
+                if (pair) {
+                  loadPairState(pair).catch((loadError: unknown) => {
+                    setError(toFriendlyError(loadError, 'Could not load folder pair.'));
+                  });
+                }
+              }}
+            >
+              <option value="">New folder pair</option>
+              {pairs.map((pair) => (
+                <option key={pair.id} value={pair.id}>
+                  {pair.name}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Pair name"
+              value={pairName}
+              onChange={(event) => setPairName(event.target.value)}
+              placeholder="Origin to Backup"
+            />
+          </section>
+
+          <section className="side-section">
+            <h2>Actions</h2>
+            <button type="button" onClick={() => scan()} disabled={isScanning}>
+              {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
+              Scan
+            </button>
+            <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
+              <HardDrive size={16} aria-hidden="true" />
+              Deep Scan
+            </button>
+            <button
+              type="button"
+              onClick={() => createCopyQueue([], [leftPath])}
+              disabled={statusSummary.missingInBackup === 0 || isPreparingOperation}
+            >
+              <Copy size={16} aria-hidden="true" />
+              Copy Ready
+            </button>
+            <button
+              className={selectionMode ? 'toolbar-active' : ''}
+              type="button"
+              onClick={() => {
+                setSelectionMode((current) => !current);
+                setSelectedPaths([]);
+                setSelectedFolderPaths([]);
+                setCleanupPreview(null);
+              }}
+            >
+              <CheckSquare size={16} aria-hidden="true" />
+              Select
+            </button>
+            <button
+              className={cleanupMode ? 'toolbar-active' : ''}
+              type="button"
+              onClick={() => {
+                setCleanupMode((current) => !current);
+                setSelectionMode(true);
+                setSelectedPaths([]);
+                setSelectedFolderPaths([]);
+                setCleanupPreview(null);
+              }}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              Cleanup Mode
+            </button>
+            <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
+              <Settings size={16} aria-hidden="true" />
+              Settings
+            </button>
+          </section>
+
+          <section className="side-section">
+            <h2>View</h2>
+            <label className="compact-field">
+              Filter
+              <select
+                aria-label="View filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value as FilterKey)}
+              >
+                {filterOptions.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="search-box">
+              <Search size={15} aria-hidden="true" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search"
+              />
+            </div>
+            <label className="compact-field">
+              Verify
+              <select
+                aria-label="Verification level"
+                value={verificationLevel}
+                onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
+              >
+                <option value="auto">Auto</option>
+                <option value="basic">Size</option>
+                <option value="strong">Hash</option>
+              </select>
+            </label>
+            <label className="mirror-toggle">
+              <input
+                type="checkbox"
+                checked={activePair?.mirrorNavigationEnabled ?? true}
+                disabled={!activePair}
+                onChange={(event) => updatePairSettings({ mirrorNavigationEnabled: event.target.checked })}
+              />
+              Mirror navigation
+            </label>
+          </section>
+
+          <section className="side-section">
+            <h2>Selection</h2>
+            <span className="selection-summary">
+              {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
+            </span>
+            <button
+              type="button"
+              disabled={cleanupMode || (copySelectedFiles.length === 0 && selectedFolderPaths.length === 0)}
+              onClick={() => createCopyQueue(copySelectedFiles.map((file) => file.relativePath), selectedFolderPaths)}
+            >
+              Copy selected
+            </button>
+            {cleanupMode ? (
+              <>
+                <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
+                  Cleanup preview
+                </button>
+                <button type="button" disabled={!cleanupPreview || cleanupPreview.filesSelected === 0} onClick={createCleanupQueue}>
+                  Cleanup selected
+                </button>
+              </>
+            ) : null}
+            <select
+              aria-label="More actions"
+              className="action-menu"
+              value=""
+              onChange={(event) => {
+                runMoreAction(event.target.value);
+                event.target.value = '';
+              }}
+            >
+              <option value="">More actions</option>
+              <option value="swap" disabled={!originPath || !backupPath || isScanning}>
+                Swap roles
               </option>
-            ))}
-          </select>
-          <input
-            aria-label="Pair name"
-            value={pairName}
-            onChange={(event) => setPairName(event.target.value)}
-            placeholder="Origin to Backup"
-          />
-        </div>
+              <option value="selectVisible">Select visible</option>
+              <option value="clearSelection" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0}>
+                Clear selection
+              </option>
+              <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
+                Copy selected conflicts
+              </option>
+            </select>
+          </section>
 
-        <div className="theme-switch">
-          <button type="button" title="Light theme" onClick={() => setTheme('light')}>
-            <Sun size={16} aria-hidden="true" />
-          </button>
-          <button type="button" title="Dark theme" onClick={() => setTheme('dark')}>
-            <Moon size={16} aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+          <section className="side-section side-theme">
+            <button type="button" title="Light theme" onClick={() => setTheme('light')}>
+              <Sun size={16} aria-hidden="true" />
+              Light
+            </button>
+            <button type="button" title="Dark theme" onClick={() => setTheme('dark')}>
+              <Moon size={16} aria-hidden="true" />
+              Dark
+            </button>
+          </section>
+        </aside>
 
-      <section className="toolbar">
-        <button type="button" onClick={() => scan()} disabled={isScanning}>
-          {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
-          Scan
-        </button>
-        <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
-          <HardDrive size={16} aria-hidden="true" />
-          Deep Scan
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            createCopyQueue(copyReadyFiles.map((file) => file.relativePath))
-          }
-          disabled={copyReadyFiles.length === 0 || isPreparingOperation}
-        >
-          <Copy size={16} aria-hidden="true" />
-          Copy Ready
-        </button>
-        <button
-          className={selectionMode ? 'toolbar-active' : ''}
-          type="button"
-          onClick={() => {
-            setSelectionMode((current) => !current);
-            setSelectedPaths([]);
-            setSelectedFolderPaths([]);
-            setCleanupPreview(null);
-          }}
-        >
-          <CheckSquare size={16} aria-hidden="true" />
-          Select
-        </button>
-        <button
-          className={cleanupMode ? 'toolbar-active' : ''}
-          type="button"
-          onClick={() => {
-            setCleanupMode((current) => !current);
-            setSelectionMode(true);
-            setSelectedPaths([]);
-            setSelectedFolderPaths([]);
-            setCleanupPreview(null);
-          }}
-        >
-          <Trash2 size={16} aria-hidden="true" />
-          Cleanup Mode
-        </button>
-        <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
-          <Settings size={16} aria-hidden="true" />
-          Settings
-        </button>
-        <select
-          aria-label="More actions"
-          className="action-menu"
-          value=""
-          onChange={(event) => {
-            runMoreAction(event.target.value);
-            event.target.value = '';
-          }}
-        >
-          <option value="">More</option>
-          <option value="swap" disabled={!originPath || !backupPath || isScanning}>
-            Swap roles
-          </option>
-          <option value="selectVisible">Select visible</option>
-          <option value="clearSelection" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0}>
-            Clear selection
-          </option>
-          <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
-            Copy selected conflicts
-          </option>
-        </select>
-        <label className="mirror-toggle">
-          <input
-            type="checkbox"
-            checked={activePair?.mirrorNavigationEnabled ?? true}
-            disabled={!activePair}
-            onChange={(event) => updatePairSettings({ mirrorNavigationEnabled: event.target.checked })}
-          />
-          Mirror navigation
-        </label>
-      </section>
-
-      <section className="status-strip">
+        <section className="main-workspace">
+          <section className="status-strip">
         <span>Last scan: {formatDate(activePair?.lastScanAt ?? null)}</span>
         <span>Last copy: {formatDate(lastCopyAt)}</span>
         <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
@@ -1755,67 +1827,6 @@ const App = () => {
           {error}
         </div>
       ) : null}
-
-      <section className="workspace-tools">
-        <label className="compact-field">
-          View
-          <select
-            aria-label="View filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as FilterKey)}
-          >
-            {filterOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="search-box">
-          <Search size={15} aria-hidden="true" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search"
-          />
-        </div>
-
-        <span className="selection-summary">
-          {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
-        </span>
-
-        <label className="compact-field">
-          Verify
-          <select
-            aria-label="Verification level"
-            value={verificationLevel}
-            onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
-          >
-            <option value="auto">Auto</option>
-            <option value="basic">Size</option>
-            <option value="strong">Hash</option>
-          </select>
-        </label>
-
-        <button
-          type="button"
-          disabled={cleanupMode || (copySelectedFiles.length === 0 && selectedFolderPaths.length === 0)}
-          onClick={() => createCopyQueue(copySelectedFiles.map((file) => file.relativePath), selectedFolderPaths)}
-        >
-          Copy selected
-        </button>
-        {cleanupMode ? (
-          <>
-            <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
-              Cleanup preview
-            </button>
-            <button type="button" disabled={!cleanupPreview || cleanupPreview.filesSelected === 0} onClick={createCleanupQueue}>
-              Cleanup selected
-            </button>
-          </>
-        ) : null}
-      </section>
 
       {copyPreview ? (
         <section className="operation-preview">
@@ -1970,6 +1981,8 @@ const App = () => {
           </div>
         </section>
       ) : null}
+        </section>
+      </div>
     </main>
   );
 };
