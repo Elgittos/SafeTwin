@@ -41,6 +41,8 @@ const createWindow = () => {
       nodeIntegration: false,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAutoHideMenuBar(true);
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {

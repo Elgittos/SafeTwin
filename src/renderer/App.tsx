@@ -89,7 +89,9 @@ const App = () => {
   const [activePair, setActivePair] = useState<FolderPair | null>(null);
   const [originPath, setOriginPath] = useState('');
   const [backupPath, setBackupPath] = useState('');
-  const [currentPath, setCurrentPath] = useState('');
+  const [originCurrentPath, setOriginCurrentPath] = useState('');
+  const [backupCurrentPath, setBackupCurrentPath] = useState('');
+  const [linkedNavigation, setLinkedNavigation] = useState(true);
   const [originEntries, setOriginEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [backupEntries, setBackupEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
@@ -155,7 +157,7 @@ const App = () => {
   );
   const selectedDeleteCount = selectedDeletePaths.length + selectedDeleteFolderPaths.length;
   const cleanAllBytes = backupOnlyFiles.reduce((total, file) => total + file.sizeBytes, 0);
-  const cleanAllConfirmed = cleanAllConfirmText.trim().toUpperCase() === 'CLEAN ALL';
+  const cleanAllConfirmed = cleanAllConfirmText.trim().toUpperCase() === 'CLEAN DIFFERENCES';
   const operationPercent =
     operation && operation.totals.bytesTotal > 0
       ? Math.min(100, Math.round((operation.totals.bytesDone / operation.totals.bytesTotal) * 100))
@@ -176,6 +178,7 @@ const App = () => {
         setActivePair(pair);
         setOriginPath(pair.originPath);
         setBackupPath(pair.backupPath);
+        setLinkedNavigation(pair.mirrorNavigationEnabled);
         return window.safetwin.getLastStatus(pair.id);
       })
       .then((status) => {
@@ -197,7 +200,7 @@ const App = () => {
     }
 
     window.safetwin
-      .listDirectory(originPath, currentPath)
+      .listDirectory(originPath, originCurrentPath)
       .then((entries) => {
         setOriginEntries(entries);
       })
@@ -207,7 +210,7 @@ const App = () => {
           setError(toFriendlyError(listError, 'Could not read the origin folder.'));
         }
       });
-  }, [currentPath, originPath, refreshToken]);
+  }, [originCurrentPath, originPath, refreshToken]);
 
   useEffect(() => {
     if (!backupPath) {
@@ -216,7 +219,7 @@ const App = () => {
     }
 
     window.safetwin
-      .listDirectory(backupPath, currentPath)
+      .listDirectory(backupPath, backupCurrentPath)
       .then((entries) => {
         setBackupEntries(entries);
       })
@@ -226,7 +229,7 @@ const App = () => {
           setError(toFriendlyError(listError, 'Could not read the backup folder.'));
         }
       });
-  }, [backupPath, currentPath, refreshToken]);
+  }, [backupCurrentPath, backupPath, refreshToken]);
 
   useEffect(() => {
     if (!operation || isTerminalOperationState(operation.operation.state)) {
@@ -292,14 +295,63 @@ const App = () => {
       name: pairName(nextOriginPath, nextBackupPath),
       originPath: nextOriginPath,
       backupPath: nextBackupPath,
-      mirrorNavigationEnabled: true,
+      mirrorNavigationEnabled: linkedNavigation,
       reminderIntervalDays: null,
     };
     const savedPair = await window.safetwin.saveFolderPair(input);
     setActivePair(savedPair);
     setOriginPath(savedPair.originPath);
     setBackupPath(savedPair.backupPath);
+    setLinkedNavigation(savedPair.mirrorNavigationEnabled);
     return savedPair;
+  };
+
+  const resetPanePaths = () => {
+    setOriginCurrentPath('');
+    setBackupCurrentPath('');
+  };
+
+  const navigatePane = (side: PaneSide, nextPath: string) => {
+    const normalizedPath = normalizePath(nextPath);
+
+    if (linkedNavigation) {
+      setOriginCurrentPath(normalizedPath);
+      setBackupCurrentPath(normalizedPath);
+      return;
+    }
+
+    if (side === 'origin') {
+      setOriginCurrentPath(normalizedPath);
+      return;
+    }
+
+    setBackupCurrentPath(normalizedPath);
+  };
+
+  const toggleLinkedNavigation = async () => {
+    const nextValue = !linkedNavigation;
+    setLinkedNavigation(nextValue);
+    setError(null);
+
+    if (nextValue) {
+      setBackupCurrentPath(originCurrentPath);
+    }
+
+    if (!activePair) {
+      return;
+    }
+
+    try {
+      const updatedPair = await window.safetwin.updateFolderPairSettings({
+        id: activePair.id,
+        mirrorNavigationEnabled: nextValue,
+      });
+      setActivePair(updatedPair);
+      setLinkedNavigation(updatedPair.mirrorNavigationEnabled);
+    } catch (settingsError: unknown) {
+      setLinkedNavigation(!nextValue);
+      setError(toFriendlyError(settingsError, 'Could not save the navigation setting.'));
+    }
   };
 
   const chooseFolder = async (side: PaneSide) => {
@@ -312,7 +364,7 @@ const App = () => {
     const nextOriginPath = side === 'origin' ? result.path : originPath;
     const nextBackupPath = side === 'backup' ? result.path : backupPath;
     setError(null);
-    setCurrentPath('');
+    resetPanePaths();
     setSelectedCopyPaths([]);
     setSelectedCopyFolderPaths([]);
     setSelectedDeletePaths([]);
@@ -499,7 +551,7 @@ const App = () => {
     setError(null);
     try {
       const savedPair = await savePair(backupPath, originPath);
-      setCurrentPath('');
+      resetPanePaths();
       setSelectedCopyPaths([]);
       setSelectedCopyFolderPaths([]);
       setSelectedDeletePaths([]);
@@ -541,6 +593,7 @@ const App = () => {
     side: PaneSide,
     entries: DirectoryPreviewEntry[],
     rootPath: string,
+    currentPath: string,
     oppositeEntries: DirectoryPreviewEntry[],
   ) => {
     const isOrigin = side === 'origin';
@@ -561,7 +614,7 @@ const App = () => {
         </header>
 
         <div className="breadcrumb">
-          <button type="button" disabled={!currentPath} onClick={() => setCurrentPath(parentPath(currentPath))}>
+          <button type="button" disabled={!currentPath} onClick={() => navigatePane(side, parentPath(currentPath))}>
             Up
           </button>
           <span>{currentPath || 'Root'}</span>
@@ -645,7 +698,7 @@ const App = () => {
                   }}
                   onClick={() => {
                     if (entry.kind === 'folder') {
-                      setCurrentPath(normalizePath(entry.relativePath));
+                      navigatePane(side, entry.relativePath);
                     } else if (canSelectFile) {
                       toggleSelected(side, entry.relativePath);
                     }
@@ -713,6 +766,22 @@ const App = () => {
 
         <button
           type="button"
+          className={`link-toggle ${linkedNavigation ? 'link-toggle-on' : ''}`}
+          disabled={!originPath || !backupPath || isBusy}
+          onClick={() => {
+            void toggleLinkedNavigation();
+          }}
+          title={
+            linkedNavigation
+              ? 'Folder panes move together'
+              : 'Folder panes navigate independently'
+          }
+        >
+          Linked navigation: {linkedNavigation ? 'On' : 'Off'}
+        </button>
+
+        <button
+          type="button"
           disabled={!activePair || isBusy}
           onClick={() => {
             void runScan(activePair, 'deep');
@@ -740,7 +809,7 @@ const App = () => {
             setCleanAllConfirmText('');
           }}
         >
-          Clean All
+          Clean Differences
         </button>
         <button
           type="button"
@@ -765,14 +834,14 @@ const App = () => {
 
         {cleanAllConfirmOpen ? (
           <section className="selection-panel danger-panel">
-            <strong>Clean {backupOnlyFiles.length} extra files</strong>
+            <strong>Clean {backupOnlyFiles.length} differences</strong>
             <span>{formatBytes(cleanAllBytes)} will be moved from backup to Recycle Bin.</span>
             <label>
-              Type CLEAN ALL
+              Type CLEAN DIFFERENCES
               <input
                 value={cleanAllConfirmText}
                 onChange={(event) => setCleanAllConfirmText(event.target.value)}
-                aria-label="Type CLEAN ALL to confirm Clean All"
+                aria-label="Type CLEAN DIFFERENCES to confirm Clean Differences"
               />
             </label>
             <button
@@ -850,8 +919,8 @@ const App = () => {
         {error ? <div className="error-line">{error}</div> : null}
 
         <section className="panes">
-          {renderPane('origin', originEntries, originPath, backupEntries)}
-          {renderPane('backup', backupEntries, backupPath, originEntries)}
+          {renderPane('origin', originEntries, originPath, originCurrentPath, backupEntries)}
+          {renderPane('backup', backupEntries, backupPath, backupCurrentPath, originEntries)}
         </section>
 
         {operation ? (

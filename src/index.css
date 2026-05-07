@@ -88,6 +88,24 @@ input:disabled {
   font-weight: 650;
 }
 
+.link-toggle {
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid #d5dde8;
+  border-radius: 6px;
+  color: #42526a;
+  background: #f1f5f9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.link-toggle-on {
+  color: #0f5132;
+  border-color: #b7dec9;
+  background: #e9f8ef;
+}
+
 .brand span,
 .counts span,
 .selection-panel span,
@@ -521,6 +539,7 @@ input:disabled {
 
 .theme-dark input,
 .theme-dark .theme-toggle,
+.theme-dark .link-toggle,
 .theme-dark .action-bar > button,
 .theme-dark .selection-panel button,
 .theme-dark .folder-picker,
@@ -528,6 +547,17 @@ input:disabled {
   color: #d9e2ee;
   border-color: #3a4a60;
   background: #101722;
+}
+
+.theme-dark .link-toggle {
+  color: #aec0d3;
+  background: #172232;
+}
+
+.theme-dark .link-toggle-on {
+  color: #baf0ce;
+  border-color: #2d6743;
+  background: #10281b;
 }
 
 .theme-dark button:disabled,
