@@ -764,21 +764,20 @@ const App = () => {
           </button>
         </div>
 
-        <button
-          type="button"
-          className={`link-toggle ${linkedNavigation ? 'link-toggle-on' : ''}`}
-          disabled={!originPath || !backupPath || isBusy}
-          onClick={() => {
-            void toggleLinkedNavigation();
-          }}
-          title={
-            linkedNavigation
-              ? 'Folder panes move together'
-              : 'Folder panes navigate independently'
-          }
+        <label
+          className="linked-setting"
+          title={linkedNavigation ? 'Folder panes move together' : 'Folder panes navigate independently'}
         >
-          Linked navigation: {linkedNavigation ? 'On' : 'Off'}
-        </button>
+          <input
+            type="checkbox"
+            checked={linkedNavigation}
+            disabled={!originPath || !backupPath || isBusy}
+            onChange={() => {
+              void toggleLinkedNavigation();
+            }}
+          />
+          <span>Linked navigation</span>
+        </label>
 
         <button
           type="button"

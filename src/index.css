@@ -47,7 +47,7 @@ input:disabled {
 
 .app-frame {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 188px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
@@ -56,9 +56,9 @@ input:disabled {
 .action-bar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 14px 12px;
+  padding: 12px 10px;
   border-right: 1px solid #cfd7e3;
   background: #f8fafc;
 }
@@ -66,13 +66,13 @@ input:disabled {
 .brand {
   display: grid;
   gap: 2px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid #d9e0ea;
 }
 
 .brand h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 23px;
   line-height: 1;
 }
 
@@ -88,22 +88,31 @@ input:disabled {
   font-weight: 650;
 }
 
-.link-toggle {
-  justify-content: flex-start;
-  min-height: 32px;
-  padding: 0 9px;
-  border: 1px solid #d5dde8;
-  border-radius: 6px;
+.linked-setting {
+  display: inline-grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
   color: #42526a;
-  background: #f1f5f9;
   font-size: 12px;
   font-weight: 700;
+  user-select: none;
 }
 
-.link-toggle-on {
-  color: #0f5132;
-  border-color: #b7dec9;
-  background: #e9f8ef;
+.linked-setting input {
+  width: 15px;
+  height: 15px;
+  min-height: 15px;
+  margin: 0;
+  padding: 0;
+  accent-color: #1d6f52;
+}
+
+.linked-setting span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .brand span,
@@ -124,7 +133,7 @@ input:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
+  min-height: 32px;
   padding: 0 10px;
   border: 1px solid #bdc8d8;
   border-radius: 6px;
@@ -157,8 +166,8 @@ input:disabled {
 .selection-panel,
 .counts {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 9px;
   border: 1px solid #d9e0ea;
   border-radius: 8px;
   background: #ffffff;
@@ -286,14 +295,14 @@ input:disabled {
 
 .pane-header {
   min-width: 0;
-  padding: 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid #dde4ee;
   background: #f8fafc;
 }
 
 .pane-header div {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -317,10 +326,10 @@ input:disabled {
 
 .breadcrumb {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 50px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 38px;
+  min-height: 34px;
   padding: 4px 10px;
   border-bottom: 1px solid #edf1f6;
 }
@@ -339,12 +348,39 @@ input:disabled {
 .file-list {
   min-height: 0;
   overflow: auto;
+  scrollbar-color: #8ba1bb transparent;
+  scrollbar-width: thin;
+}
+
+.file-list::-webkit-scrollbar,
+.context-menu::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.file-list::-webkit-scrollbar-track,
+.context-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.file-list::-webkit-scrollbar-thumb,
+.context-menu::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #8ba1bb;
+  background-clip: padding-box;
+}
+
+.file-list::-webkit-scrollbar-thumb:hover,
+.context-menu::-webkit-scrollbar-thumb:hover {
+  background: #63758d;
+  background-clip: padding-box;
 }
 
 .file-row {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
-  min-height: 34px;
+  min-height: 32px;
   border-bottom: 1px solid #f0f3f7;
 }
 
@@ -366,7 +402,7 @@ input:disabled {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 34px;
+  min-height: 32px;
   padding: 0 12px 0 2px;
   border: 0;
   border-radius: 0;
@@ -539,7 +575,6 @@ input:disabled {
 
 .theme-dark input,
 .theme-dark .theme-toggle,
-.theme-dark .link-toggle,
 .theme-dark .action-bar > button,
 .theme-dark .selection-panel button,
 .theme-dark .folder-picker,
@@ -549,15 +584,8 @@ input:disabled {
   background: #101722;
 }
 
-.theme-dark .link-toggle {
+.theme-dark .linked-setting {
   color: #aec0d3;
-  background: #172232;
-}
-
-.theme-dark .link-toggle-on {
-  color: #baf0ce;
-  border-color: #2d6743;
-  background: #10281b;
 }
 
 .theme-dark button:disabled,
@@ -673,4 +701,20 @@ input:disabled {
 
 .theme-dark .context-menu button {
   color: #d9e2ee;
+}
+
+.theme-dark .file-list {
+  scrollbar-color: #3c5068 transparent;
+}
+
+.theme-dark .file-list::-webkit-scrollbar-thumb,
+.theme-dark .context-menu::-webkit-scrollbar-thumb {
+  background: #3c5068;
+  background-clip: padding-box;
+}
+
+.theme-dark .file-list::-webkit-scrollbar-thumb:hover,
+.theme-dark .context-menu::-webkit-scrollbar-thumb:hover {
+  background: #536a86;
+  background-clip: padding-box;
 }

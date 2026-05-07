@@ -30,10 +30,10 @@ const createWindow = () => {
 
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 980,
-    minHeight: 680,
+    width: 1040,
+    height: 620,
+    minWidth: 820,
+    minHeight: 500,
     title: 'SafeTwin',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
