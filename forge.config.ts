@@ -27,6 +27,7 @@ const config: ForgeConfig = {
       name: 'SafeTwin',
       setupExe: 'SafeTwinSetup.exe',
       setupIcon: 'assets/icon.ico',
+      loadingGif: 'assets/installing.gif',
     }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
