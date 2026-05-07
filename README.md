@@ -124,3 +124,8 @@ The main app code lives in:
 - `src/index.css`
 - `src/shared/types.ts`
 
+## License
+
+SafeTwin is free software licensed under the MIT License.
+
+You can use, share, modify, and redistribute it, but the copyright and license notice must stay with the software so credit remains attached.
