@@ -255,6 +255,16 @@ export interface DirectoryPreviewEntry {
   mtimeMs: number;
 }
 
+export interface TrashItemInput {
+  rootPath: string;
+  itemPath: string;
+}
+
+export interface TrashItemResult {
+  method: 'recycleBin' | 'safeTwinTrash';
+  fallbackPath: string | null;
+}
+
 export interface SafeTwinApi {
   chooseFolder: () => Promise<ChooseFolderResult>;
   listDirectory: (rootPath: string, relativePath?: string) => Promise<DirectoryPreviewEntry[]>;
@@ -281,5 +291,6 @@ export interface SafeTwinApi {
   recoverOperations: () => Promise<RecoveryReport>;
   openFolder: (folderPath: string) => Promise<void>;
   showItemInFolder: (itemPath: string) => Promise<void>;
+  trashItem: (input: TrashItemInput) => Promise<TrashItemResult>;
   onScanProgress: (callback: (event: ScanProgressEvent) => void) => () => void;
 }

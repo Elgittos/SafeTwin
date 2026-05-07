@@ -16,6 +16,8 @@ export const defaultIgnoreRules: DefaultIgnoreRule[] = [
   { category: 'Windows metadata files', pattern: 'ehthumbs.db', reason: 'Windows metadata file' },
   { category: 'Windows metadata files', pattern: 'desktop.ini', reason: 'Windows metadata file' },
   { category: 'Windows metadata files', pattern: '.DS_Store', reason: 'macOS metadata file' },
+  { category: 'SafeTwin recovery', pattern: '.safetwin-trash', reason: 'SafeTwin local trash folder' },
+  { category: 'SafeTwin recovery', pattern: '**/.safetwin-trash/**', reason: 'SafeTwin local trash folder' },
   { category: 'Editor swap files', pattern: '*.swp', reason: 'Editor swap file' },
   { category: 'Editor swap files', pattern: '*.swo', reason: 'Editor swap file' },
   { category: 'LibreOffice lock files', pattern: '.~lock.*#', reason: 'LibreOffice lock file' },

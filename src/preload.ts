@@ -7,6 +7,7 @@ import type {
   SafeTwinApi,
   SaveFolderPairInput,
   ScanMode,
+  TrashItemInput,
   UpdateFolderPairSettingsInput,
 } from './shared/types';
 
@@ -42,6 +43,7 @@ const api: SafeTwinApi = {
   recoverOperations: () => ipcRenderer.invoke('safetwin:recover-operations'),
   openFolder: (folderPath: string) => ipcRenderer.invoke('safetwin:open-folder', folderPath),
   showItemInFolder: (itemPath: string) => ipcRenderer.invoke('safetwin:show-item-in-folder', itemPath),
+  trashItem: (input: TrashItemInput) => ipcRenderer.invoke('safetwin:trash-item', input),
   onScanProgress: (callback) => {
     const listener = (_event: IpcRendererEvent, progress: Parameters<typeof callback>[0]) => {
       callback(progress);

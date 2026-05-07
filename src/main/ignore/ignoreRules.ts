@@ -84,6 +84,14 @@ export class IgnoreRuleService {
     const normalized = relativePath.replaceAll('\\', '/');
     const basename = normalized.split('/').at(-1) ?? normalized;
 
+    if (normalized === '.safetwin-trash' || normalized.startsWith('.safetwin-trash/')) {
+      return 'SafeTwin local trash folder';
+    }
+
+    if (normalized.includes('/.safetwin-trash/')) {
+      return 'SafeTwin local trash folder';
+    }
+
     for (const rule of this.rules) {
       if (rule.matcher(normalized) || rule.matcher(basename)) {
         return rule.reason;

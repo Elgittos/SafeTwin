@@ -1,148 +1,40 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  Archive,
-  Check,
-  CheckSquare,
-  ChevronLeft,
-  ChevronRight,
-  Cloud,
-  Code2,
-  File,
-  FileImage,
-  FileText,
-  FileVideo,
-  Folder,
-  FolderOpen,
-  HardDrive,
-  Loader2,
-  LockKeyhole,
-  Minus,
-  Moon,
-  Pause,
-  Play,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Search,
-  Settings,
-  Square,
-  Sun,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Check, FolderOpen, Loader2 } from 'lucide-react';
 import type {
-  CleanupPreview,
-  DirectoryDiffSamples,
   DirectoryPreviewEntry,
-  DirectoryDiffSummary,
-  FileCompareItem,
   FolderPair,
-  IgnoreRuleSetting,
-  OperationQueueItem,
   OperationSnapshot,
   SaveFolderPairInput,
-  ScanMode,
   ScanProgressEvent,
-  ScanResult,
   ScanSummary,
-  VerificationLevel,
+  ScanResult,
 } from '../shared/types';
 
 type PaneSide = 'origin' | 'backup';
 type ThemeMode = 'light' | 'dark';
-type FilterKey = 'all' | 'missing' | 'backupOnly' | 'conflicts' | 'ignored' | 'skipped' | 'failed';
-type CopyAction = 'copyMissing' | 'copyConflictDuplicate';
 
-const filterOptions: Array<[FilterKey, string]> = [
-  ['missing', 'Missing from recipient'],
-  ['conflicts', 'Conflicts'],
-  ['backupOnly', 'Backup-only'],
-  ['ignored', 'Ignored'],
-  ['skipped', 'Skipped'],
-  ['failed', 'Failed'],
-  ['all', 'All'],
-];
-
-const showAdvancedControls = true;
-
-interface CopyPreview {
-  filesSelected: number;
-  conflictsSelected: number;
-  totalSize: number;
-}
-
-interface ParentRow {
-  kind: 'parent';
+interface ItemContextMenu {
+  x: number;
+  y: number;
   side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
+  entry: DirectoryPreviewEntry;
+  rootPath: string;
 }
 
-interface FolderRow {
-  kind: 'folder';
-  side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
-  counts: ScanSummary;
-  countsKnown: boolean;
-  samples: DirectoryDiffSamples | null;
-  failedCount: number;
-}
+const normalizePath = (relativePath: string): string =>
+  relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
 
-interface FileRow {
-  kind: 'file';
-  side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
-  file: FileCompareItem;
-  operationItem: OperationQueueItem | null;
-}
+const parentPath = (relativePath: string): string => {
+  const normalized = normalizePath(relativePath);
+  const slashIndex = normalized.lastIndexOf('/');
+  return slashIndex === -1 ? '' : normalized.slice(0, slashIndex);
+};
 
-interface PreviewFolderRow {
-  kind: 'previewFolder';
-  side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
-}
+const folderName = (folderPath: string, fallback: string): string =>
+  folderPath.split(/[\\/]/).filter(Boolean).at(-1) ?? fallback;
 
-interface PreviewFileRow {
-  kind: 'previewFile';
-  side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
-  absolutePath: string;
-  sizeBytes: number;
-}
-
-interface MissingPlaceholderRow {
-  kind: 'missingPlaceholder';
-  side: PaneSide;
-  relativePath: string;
-  name: string;
-  displayPath: string;
-  sizeBytes: number;
-}
-
-type PaneRow = ParentRow | FolderRow | FileRow | PreviewFolderRow | PreviewFileRow | MissingPlaceholderRow;
-
-const emptySummary = (): ScanSummary => ({
-  missingInBackup: 0,
-  backupOnly: 0,
-  identical: 0,
-  conflicts: 0,
-  ignored: 0,
-  notLocalPlaceholder: 0,
-  lockedOrUnreadable: 0,
-  unstableChangingFile: 0,
-  totalMissingSize: 0,
-  totalBackupOnlySize: 0,
-});
+const pairName = (originPath: string, backupPath: string): string =>
+  `${folderName(originPath, 'Origin')} to ${folderName(backupPath, 'Backup')}`;
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) {
@@ -155,1028 +47,260 @@ const formatBytes = (bytes: number): string => {
   return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 };
 
-const formatDate = (value: string | null): string => {
-  if (!value) {
-    return 'Never';
-  }
+const toFriendlyError = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message || fallback : fallback;
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+const fileKey = (relativePath: string): string => normalizePath(relativePath).toLowerCase();
+
+const isMissingDirectoryError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes('enoent') || message.includes('no such file or directory') || message.includes('scandir');
 };
 
-const toFriendlyError = (error: unknown, fallback: string): string => {
-  const rawMessage = error instanceof Error ? error.message : fallback;
-  const message = rawMessage.toLowerCase();
+const folderHasDiff = (counts: ScanSummary): boolean =>
+  counts.missingInBackup > 0 ||
+  counts.backupOnly > 0 ||
+  counts.conflicts > 0 ||
+  counts.ignored > 0 ||
+  counts.notLocalPlaceholder > 0 ||
+  counts.lockedOrUnreadable > 0 ||
+  counts.unstableChangingFile > 0;
 
-  if (message.includes('ebusy') || message.includes('being used') || message.includes('locked')) {
-    return `${fallback} This file is being used by another app. ${rawMessage}`;
+const terminalOperationStates = ['completed', 'failed', 'cancelled'] as const;
+
+const isTerminalOperationState = (state: OperationSnapshot['operation']['state']): boolean =>
+  terminalOperationStates.includes(state as (typeof terminalOperationStates)[number]);
+
+const operationVerb = (operation: OperationSnapshot): string =>
+  operation.operation.type === 'copy' ? 'Copy' : 'Delete';
+
+const getInitialTheme = (): ThemeMode => {
+  const savedTheme = window.localStorage.getItem('safetwin-theme');
+
+  if (savedTheme === 'light' || savedTheme === 'dark') {
+    return savedTheme;
   }
 
-  if (message.includes('eacces') || message.includes('eperm') || message.includes('permission')) {
-    return `${fallback} SafeTwin does not have permission to access this path. ${rawMessage}`;
-  }
-
-  if (message.includes('cloud') || message.includes('placeholder') || message.includes('not ready')) {
-    return `${fallback} This file is cloud-only or not available locally. ${rawMessage}`;
-  }
-
-  if (message.includes('enospc') || message.includes('not enough') || message.includes('disk full')) {
-    return `${fallback} The recipient drive does not have enough free space. ${rawMessage}`;
-  }
-
-  if (message.includes('hash') || message.includes('verification') || message.includes('mismatch')) {
-    return `${fallback} The copied file did not pass verification. ${rawMessage}`;
-  }
-
-  if (message.includes('enametoolong') || message.includes('path too long')) {
-    return `${fallback} This file path is too long for the current operation. ${rawMessage}`;
-  }
-
-  if (message.includes('changed during') || message.includes('unstable')) {
-    return `${fallback} This file changed during the operation and was skipped. ${rawMessage}`;
-  }
-
-  return rawMessage || fallback;
-};
-
-const normalizePath = (relativePath: string): string =>
-  relativePath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
-
-const metadataTimeToleranceMs = 2_000;
-
-const parentPath = (relativePath: string): string => {
-  const normalized = normalizePath(relativePath);
-  const slashIndex = normalized.lastIndexOf('/');
-  return slashIndex === -1 ? '' : normalized.slice(0, slashIndex);
-};
-
-const basename = (relativePath: string): string => {
-  const normalized = normalizePath(relativePath);
-  return normalized.split('/').filter(Boolean).at(-1) ?? 'Root';
-};
-
-const extension = (relativePath: string): string => {
-  const name = basename(relativePath);
-  const dotIndex = name.lastIndexOf('.');
-  return dotIndex === -1 ? '' : name.slice(dotIndex + 1).toLowerCase();
-};
-
-const getDefaultPairName = (originPath: string, backupPath: string): string => {
-  const origin = originPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Origin';
-  const backup = backupPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Recipient';
-  return `${origin} to ${backup}`;
-};
-
-const getFileIcon = (relativePath: string) => {
-  const ext = extension(relativePath);
-
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(ext)) {
-    return <FileImage size={16} aria-hidden="true" />;
-  }
-
-  if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) {
-    return <FileVideo size={16} aria-hidden="true" />;
-  }
-
-  if (['docx', 'odt', 'txt', 'pdf'].includes(ext)) {
-    return <FileText size={16} aria-hidden="true" />;
-  }
-
-  if (['zip', 'rar', '7z'].includes(ext)) {
-    return <Archive size={16} aria-hidden="true" />;
-  }
-
-  if (['js', 'ts', 'html', 'css', 'json'].includes(ext)) {
-    return <Code2 size={16} aria-hidden="true" />;
-  }
-
-  return <File size={16} aria-hidden="true" />;
-};
-
-const fileVisibleOnSide = (file: FileCompareItem, side: PaneSide): boolean =>
-  side === 'origin' ? file.originPath !== null : file.backupPath !== null;
-
-const sidePath = (file: FileCompareItem, side: PaneSide): string | null =>
-  side === 'origin' ? file.originPath : file.backupPath;
-
-const skippedCount = (summary: ScanSummary): number =>
-  summary.notLocalPlaceholder + summary.lockedOrUnreadable + summary.unstableChangingFile;
-
-const samplesTitle = (label: string, count: number, samples?: string[] | null): string => {
-  if (!samples?.length) {
-    return label;
-  }
-
-  return `${label}: ${count}\nExamples:\n${samples.join('\n')}`;
-};
-
-const plural = (count: number, singular: string, pluralWord = `${singular}s`): string =>
-  `${count} ${count === 1 ? singular : pluralWord}`;
-
-const progressPercent = (done: number, total: number): number => (total > 0 ? Math.round((done / total) * 100) : 0);
-
-const createLiveCompareItem = (
-  side: PaneSide,
-  entry: DirectoryPreviewEntry,
-  oppositeEntry: DirectoryPreviewEntry | null,
-): FileCompareItem => {
-  const relativePath = normalizePath(entry.relativePath);
-  const oppositeFile = oppositeEntry?.kind === 'file' ? oppositeEntry : null;
-
-  if (!oppositeFile) {
-    return {
-      relativePath,
-      displayPath: relativePath,
-      state: side === 'origin' ? 'missingInBackup' : 'backupOnly',
-      originPath: side === 'origin' ? entry.absolutePath : null,
-      backupPath: side === 'backup' ? entry.absolutePath : null,
-      sizeBytes: entry.sizeBytes,
-      reason: side === 'origin' ? 'Visible in origin but not in recipient' : 'Visible in recipient but not in origin',
-    };
-  }
-
-  const matches =
-    entry.sizeBytes === oppositeFile.sizeBytes &&
-    Math.abs(entry.mtimeMs - oppositeFile.mtimeMs) <= metadataTimeToleranceMs;
-
-  return {
-    relativePath,
-    displayPath: relativePath,
-    state: matches ? 'identical' : 'conflictSamePathDifferentContent',
-    originPath: side === 'origin' ? entry.absolutePath : oppositeFile.absolutePath,
-    backupPath: side === 'backup' ? entry.absolutePath : oppositeFile.absolutePath,
-    sizeBytes: Math.max(entry.sizeBytes, oppositeFile.sizeBytes),
-    reason: matches ? 'Visible files have same size and modified time' : 'Visible files differ by size or modified time',
-  };
-};
-
-const stateLabel = (file: FileCompareItem): string => {
-  if (file.state === 'missingInBackup') {
-    return 'missing in recipient ready to back up';
-  }
-
-  if (file.state === 'backupOnly') {
-    return 'backup-only cleanup candidate';
-  }
-
-  if (file.state === 'conflictSamePathDifferentContent') {
-    return 'same name different file conflict';
-  }
-
-  if (file.state === 'notLocalPlaceholder') {
-    return 'cloud-only placeholder skipped';
-  }
-
-  if (file.state === 'lockedOrUnreadable') {
-    return 'file is locked unreadable';
-  }
-
-  if (file.state === 'unstableChangingFile') {
-    return 'changing skipped';
-  }
-
-  return file.state;
-};
-
-const buildOperationMap = (operation: OperationSnapshot | null): Map<string, OperationQueueItem> => {
-  const map = new Map<string, OperationQueueItem>();
-
-  for (const item of operation?.items ?? []) {
-    map.set(normalizePath(item.relativePath).toLowerCase(), item);
-  }
-
-  return map;
-};
-
-const descendantCount = (paths: Set<string>, folderPath: string): number => {
-  const normalizedFolder = normalizePath(folderPath).toLowerCase();
-  let count = 0;
-
-  for (const relativePath of paths) {
-    if (relativePath === normalizedFolder || relativePath.startsWith(`${normalizedFolder}/`)) {
-      count += 1;
-    }
-  }
-
-  return count;
-};
-
-const isInsideSelectedFolderPath = (file: FileCompareItem, folderPaths: string[]): boolean => {
-  const displayPath = normalizePath(file.displayPath).toLowerCase();
-
-  return folderPaths.some((folderPath) => {
-    const normalizedFolder = normalizePath(folderPath).toLowerCase();
-    if (normalizedFolder === '') {
-      return true;
-    }
-
-    return displayPath === normalizedFolder || displayPath.startsWith(`${normalizedFolder}/`);
-  });
-};
-
-const matchesFilter = (row: PaneRow, filter: FilterKey, failedPaths: Set<string>): boolean => {
-  if (row.kind === 'parent' || filter === 'all') {
-    return true;
-  }
-
-  if (row.kind === 'missingPlaceholder') {
-    return filter === 'missing';
-  }
-
-  if (row.kind === 'previewFolder') {
-    return filter === 'missing';
-  }
-
-  if (row.kind === 'previewFile') {
-    return false;
-  }
-
-  if (row.kind === 'folder') {
-    if (filter === 'missing') {
-      return row.counts.missingInBackup > 0;
-    }
-
-    if (filter === 'backupOnly') {
-      return row.counts.backupOnly > 0;
-    }
-
-    if (filter === 'conflicts') {
-      return row.counts.conflicts > 0;
-    }
-
-    if (filter === 'ignored') {
-      return row.counts.ignored > 0;
-    }
-
-    if (filter === 'skipped') {
-      return skippedCount(row.counts) > 0;
-    }
-
-    return row.failedCount > 0;
-  }
-
-  if (filter === 'missing') {
-    return row.file.state === 'missingInBackup';
-  }
-
-  if (filter === 'backupOnly') {
-    return row.file.state === 'backupOnly';
-  }
-
-  if (filter === 'conflicts') {
-    return row.file.state === 'conflictSamePathDifferentContent';
-  }
-
-  if (filter === 'ignored') {
-    return row.file.state === 'ignored';
-  }
-
-  if (filter === 'skipped') {
-    return ['notLocalPlaceholder', 'lockedOrUnreadable', 'unstableChangingFile'].includes(row.file.state);
-  }
-
-  return failedPaths.has(normalizePath(row.file.relativePath).toLowerCase());
-};
-
-const matchesSearch = (row: PaneRow, query: string): boolean => {
-  const trimmed = query.trim().toLowerCase();
-
-  if (!trimmed || row.kind === 'parent') {
-    return true;
-  }
-
-  const corpus =
-    row.kind === 'file'
-      ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} ${stateLabel(row.file)} ${row.file.reason}`
-      : row.kind === 'previewFile'
-        ? `${row.name} ${row.displayPath} ${extension(row.relativePath)} file`
-        : row.kind === 'missingPlaceholder'
-          ? `${row.name} ${row.displayPath} missing in recipient`
-          : `${row.name} ${row.displayPath} missing backup-only conflict ignored skipped folder`;
-
-  return corpus.toLowerCase().includes(trimmed);
-};
-
-const rowSortWeight = (row: PaneRow): number => {
-  if (row.kind === 'parent') {
-    return 0;
-  }
-
-  if (row.kind === 'folder' || row.kind === 'previewFolder') {
-    return 1;
-  }
-
-  return 2;
-};
-
-const buildPaneRows = (
-  side: PaneSide,
-  currentPath: string,
-  scanResult: ScanResult | null,
-  previewEntries: DirectoryPreviewEntry[],
-  oppositePreviewEntries: DirectoryPreviewEntry[],
-  quickFolderSummaries: DirectoryDiffSummary[],
-  operationByPath: Map<string, OperationQueueItem>,
-  failedPaths: Set<string>,
-  filter: FilterKey,
-  search: string,
-): PaneRow[] => {
-  const normalizedCurrent = normalizePath(currentPath);
-  const rows: PaneRow[] = [];
-
-  if (normalizedCurrent) {
-    rows.push({
-      kind: 'parent',
-      side,
-      relativePath: parentPath(normalizedCurrent),
-      name: '..',
-      displayPath: parentPath(normalizedCurrent) || 'Root',
-    });
-  }
-
-  const folderCounts = new Map(
-    (scanResult?.folders ?? []).map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder.counts]),
-  );
-  const quickFolderDetails = new Map(
-    quickFolderSummaries.map((folder) => [normalizePath(folder.relativePath).toLowerCase(), folder]),
-  );
-  const scanFilesByPath = new Map(
-    (scanResult?.files ?? [])
-      .filter((file) => fileVisibleOnSide(file, side))
-      .map((file) => [normalizePath(file.displayPath).toLowerCase(), file]),
-  );
-  const oppositePreviewByPath = new Map(
-    oppositePreviewEntries.map((entry) => [normalizePath(entry.relativePath).toLowerCase(), entry]),
-  );
-  const previewByPath = new Map(previewEntries.map((entry) => [normalizePath(entry.relativePath).toLowerCase(), entry]));
-
-  const liveRows: PaneRow[] = previewEntries.map((entry) => {
-    const relativePath = normalizePath(entry.relativePath);
-
-    if (entry.kind === 'folder') {
-      const normalizedKey = relativePath.toLowerCase();
-      const quickDetails = quickFolderDetails.get(normalizedKey);
-      const quickCounts = quickDetails?.counts;
-      const cachedCounts = folderCounts.get(normalizedKey);
-
-      return {
-        kind: 'folder',
-        side,
-        relativePath,
-        name: entry.name,
-        displayPath: relativePath,
-        counts: quickCounts ?? cachedCounts ?? emptySummary(),
-        countsKnown: Boolean(quickCounts ?? cachedCounts),
-        samples: quickDetails?.samples ?? null,
-        failedCount: descendantCount(failedPaths, relativePath),
-      };
-    }
-
-    const liveFile = createLiveCompareItem(side, entry, oppositePreviewByPath.get(relativePath.toLowerCase()) ?? null);
-    const scannedFile = scanFilesByPath.get(relativePath.toLowerCase());
-
-    if (
-      scannedFile &&
-      ['ignored', 'notLocalPlaceholder', 'lockedOrUnreadable', 'unstableChangingFile'].includes(scannedFile.state)
-    ) {
-      return {
-        kind: 'file',
-        side,
-        relativePath: scannedFile.relativePath,
-        name: entry.name,
-        displayPath: scannedFile.displayPath,
-        file: scannedFile,
-        operationItem: operationByPath.get(normalizePath(scannedFile.relativePath).toLowerCase()) ?? null,
-      };
-    }
-
-    return {
-      kind: 'file',
-      side,
-      relativePath: liveFile.relativePath,
-      name: entry.name,
-      displayPath: liveFile.displayPath,
-      file: liveFile,
-      operationItem: operationByPath.get(normalizePath(liveFile.relativePath).toLowerCase()) ?? null,
-    };
-  });
-
-  if (side === 'backup') {
-    for (const entry of oppositePreviewEntries) {
-      const relativePath = normalizePath(entry.relativePath);
-
-      if (entry.kind !== 'file' || previewByPath.has(relativePath.toLowerCase())) {
-        continue;
-      }
-
-      liveRows.push({
-        kind: 'missingPlaceholder',
-        side,
-        relativePath,
-        name: entry.name,
-        displayPath: relativePath,
-        sizeBytes: entry.sizeBytes,
-      });
-    }
-  }
-
-  liveRows.sort((left, right) => {
-    const weightDifference = rowSortWeight(left) - rowSortWeight(right);
-
-    if (weightDifference !== 0) {
-      return weightDifference;
-    }
-
-    return left.displayPath.localeCompare(right.displayPath);
-  });
-
-  return [...rows, ...liveRows].filter(
-    (row) => matchesFilter(row, filter, failedPaths) && matchesSearch(row, search),
-  );
-};
-
-const canCopy = (file: FileCompareItem): boolean =>
-  file.state === 'missingInBackup' || file.state === 'conflictSamePathDifferentContent';
-
-const canBackUpMissing = (file: FileCompareItem): boolean => file.state === 'missingInBackup';
-
-const canCleanup = (file: FileCompareItem): boolean => file.state === 'backupOnly';
-
-const indicatorFor = (row: PaneRow, side: PaneSide) => {
-  if (row.kind === 'parent' || row.kind === 'previewFolder' || row.kind === 'previewFile') {
-    return null;
-  }
-
-  if (row.kind === 'missingPlaceholder') {
-    return (
-      <span className="indicator indicator-plus" title="Missing in recipient">
-        <Plus size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.kind === 'folder') {
-    if (!row.countsKnown) {
-      return null;
-    }
-
-    return (
-      <div className="badges">
-        {row.counts.missingInBackup > 0 && side === 'origin' ? (
-          <span
-            className="badge badge-plus"
-            title={samplesTitle(
-              `Files missing from recipient inside this folder`,
-              row.counts.missingInBackup,
-              row.samples?.missingInBackup,
-            )}
-          >
-            <Plus size={12} aria-hidden="true" />
-            {plural(row.counts.missingInBackup, 'file')}
-          </span>
-        ) : null}
-        {row.counts.backupOnly > 0 && side === 'backup' ? (
-          <span
-            className="badge badge-minus"
-            title={samplesTitle('Backup-only cleanup candidate', row.counts.backupOnly, row.samples?.backupOnly)}
-          >
-            -{row.counts.backupOnly}
-          </span>
-        ) : null}
-        {row.counts.conflicts > 0 ? (
-          <span
-            className="badge badge-warn"
-            title={samplesTitle('Same name, different file', row.counts.conflicts, row.samples?.conflicts)}
-          >
-            !{row.counts.conflicts}
-          </span>
-        ) : null}
-        {skippedCount(row.counts) > 0 ? (
-          <span
-            className="badge badge-muted"
-            title={samplesTitle(
-              'Cloud-only placeholder skipped or file is locked',
-              skippedCount(row.counts),
-              row.samples?.skipped,
-            )}
-          >
-            {skippedCount(row.counts)}
-          </span>
-        ) : null}
-        {row.failedCount > 0 ? (
-          <span className="badge badge-failed" title="Failed operations">
-            {row.failedCount}
-          </span>
-        ) : null}
-        {row.counts.missingInBackup +
-          row.counts.backupOnly +
-          row.counts.conflicts +
-          skippedCount(row.counts) +
-          row.failedCount ===
-        0 ? (
-          <span className="badge badge-plus" title="Present on both sides">
-            <Check size={12} aria-hidden="true" />
-          </span>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (row.operationItem?.state === 'running') {
-    return (
-      <span className="indicator indicator-running" title="Backing up...">
-        <Loader2 className="spin" size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.operationItem?.state === 'failed') {
-    return (
-      <span className="indicator indicator-failed" title={row.operationItem.errorMessage ?? 'Failed operation'}>
-        <X size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'missingInBackup') {
-    return (
-      <span className="indicator indicator-plus" title="Missing from recipient">
-        <Plus size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'identical') {
-    return (
-      <span className="indicator indicator-plus" title="Present on both sides">
-        <Check size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'backupOnly') {
-    return (
-      <span className="indicator indicator-minus" title="Backup-only cleanup candidate">
-        <Minus size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'conflictSamePathDifferentContent') {
-    return (
-      <span className="indicator indicator-warn" title="Same name, different file">
-        <AlertTriangle size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'notLocalPlaceholder') {
-    return (
-      <span className="indicator indicator-muted" title="Cloud-only placeholder skipped">
-        <Cloud size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (row.file.state === 'lockedOrUnreadable') {
-    return (
-      <span className="indicator indicator-muted" title="File is locked">
-        <LockKeyhole size={15} aria-hidden="true" />
-      </span>
-    );
-  }
-
-  return (
-    <span className="indicator indicator-muted" title={row.file.reason}>
-      <AlertTriangle size={15} aria-hidden="true" />
-    </span>
-  );
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
 
 const App = () => {
-  const [pairs, setPairs] = useState<FolderPair[]>([]);
-  const [activePairId, setActivePairId] = useState<number | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+  const [activePair, setActivePair] = useState<FolderPair | null>(null);
   const [originPath, setOriginPath] = useState('');
   const [backupPath, setBackupPath] = useState('');
-  const [pairName, setPairName] = useState('');
-  const [leftPath, setLeftPath] = useState('');
-  const [rightPath, setRightPath] = useState('');
+  const [currentPath, setCurrentPath] = useState('');
+  const [originEntries, setOriginEntries] = useState<DirectoryPreviewEntry[]>([]);
+  const [backupEntries, setBackupEntries] = useState<DirectoryPreviewEntry[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [originPreviewEntries, setOriginPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
-  const [backupPreviewEntries, setBackupPreviewEntries] = useState<DirectoryPreviewEntry[]>([]);
-  const quickFolderSummaries = useMemo<DirectoryDiffSummary[]>(() => [], []);
-  const [refreshToken, setRefreshToken] = useState(0);
+  const [selectedCopyPaths, setSelectedCopyPaths] = useState<string[]>([]);
+  const [selectedCopyFolderPaths, setSelectedCopyFolderPaths] = useState<string[]>([]);
+  const [selectedDeletePaths, setSelectedDeletePaths] = useState<string[]>([]);
+  const [selectedDeleteFolderPaths, setSelectedDeleteFolderPaths] = useState<string[]>([]);
+  const [cleanAllConfirmOpen, setCleanAllConfirmOpen] = useState(false);
+  const [cleanAllConfirmText, setCleanAllConfirmText] = useState('');
   const [operation, setOperation] = useState<OperationSnapshot | null>(null);
-  const [operationHistory, setOperationHistory] = useState<OperationSnapshot[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgressEvent | null>(null);
-  const [copyPreview, setCopyPreview] = useState<CopyPreview | null>(null);
-  const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview | null>(null);
-  const [ignoreRules, setIgnoreRules] = useState<IgnoreRuleSetting[]>([]);
-  const [ignoredFiles, setIgnoredFiles] = useState<{ path: string; reason: string }[]>([]);
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [selectedFolderPaths, setSelectedFolderPaths] = useState<string[]>([]);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [cleanupMode, setCleanupMode] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [ignoredOpen, setIgnoredOpen] = useState(false);
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    const savedTheme = window.localStorage.getItem('safetwin-theme');
-    return savedTheme === 'dark' ? 'dark' : 'light';
-  });
-  const [filter, setFilter] = useState<FilterKey>(() => {
-    const savedFilter = window.localStorage.getItem('safetwin-view-filter') as FilterKey | null;
-    return savedFilter && filterOptions.some(([value]) => value === savedFilter) ? savedFilter : 'all';
-  });
-  const [search, setSearch] = useState('');
-  const [verificationLevel, setVerificationLevel] = useState<VerificationLevel>('auto');
-  const [isScanning, setIsScanning] = useState(false);
-  const [isPreparingOperation, setIsPreparingOperation] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [itemContextMenu, setItemContextMenu] = useState<ItemContextMenu | null>(null);
 
-  const activePair = useMemo(
-    () => pairs.find((pair) => pair.id === activePairId) ?? null,
-    [activePairId, pairs],
+  const missingFiles = useMemo(
+    () => scanResult?.files.filter((file) => file.state === 'missingInBackup') ?? [],
+    [scanResult],
   );
-  const operationByPath = useMemo(() => buildOperationMap(operation), [operation]);
-  const failedPaths = useMemo(
-    () =>
-      new Set(
-        (operation?.items ?? [])
-          .filter((item) => item.state === 'failed')
-          .map((item) => normalizePath(item.relativePath).toLowerCase()),
-      ),
-    [operation],
+  const backupOnlyFiles = useMemo(
+    () => scanResult?.files.filter((file) => file.state === 'backupOnly') ?? [],
+    [scanResult],
   );
-  const leftRows = useMemo(
-    () =>
-      buildPaneRows(
-        'origin',
-        leftPath,
-        scanResult,
-        originPreviewEntries,
-        backupPreviewEntries,
-        quickFolderSummaries,
-        operationByPath,
-        failedPaths,
-        filter,
-        search,
-      ),
-    [
-      backupPreviewEntries,
-      failedPaths,
-      filter,
-      leftPath,
-      operationByPath,
-      originPreviewEntries,
-      quickFolderSummaries,
-      scanResult,
-      search,
-    ],
+  const conflictFiles = useMemo(
+    () => scanResult?.files.filter((file) => file.state === 'conflictSamePathDifferentContent') ?? [],
+    [scanResult],
   );
-  const rightRows = useMemo(
-    () =>
-      buildPaneRows(
-        'backup',
-        rightPath,
-        scanResult,
-        backupPreviewEntries,
-        originPreviewEntries,
-        quickFolderSummaries,
-        operationByPath,
-        failedPaths,
-        filter,
-        search,
-      ),
-    [
-      backupPreviewEntries,
-      failedPaths,
-      filter,
-      operationByPath,
-      originPreviewEntries,
-      quickFolderSummaries,
-      rightPath,
-      scanResult,
-      search,
-    ],
+  const conflictByPath = useMemo(
+    () => new Map(conflictFiles.map((file) => [fileKey(file.displayPath), file])),
+    [conflictFiles],
   );
-  const selectedFiles = useMemo(() => {
-    const selected = new Set(selectedPaths);
-    const filesByPath = new Map<string, FileCompareItem>();
-
-    for (const file of scanResult?.files ?? []) {
-      filesByPath.set(normalizePath(file.relativePath).toLowerCase(), file);
-    }
-
-    for (const row of [...leftRows, ...rightRows]) {
-      if (row.kind === 'file') {
-        filesByPath.set(normalizePath(row.file.relativePath).toLowerCase(), row.file);
-      }
-    }
-
-    return [...filesByPath.values()].filter(
-      (file) => selected.has(file.relativePath) || isInsideSelectedFolderPath(file, selectedFolderPaths),
-    );
-  }, [leftRows, rightRows, scanResult, selectedFolderPaths, selectedPaths]);
-  const missingSelectedFiles = useMemo(
-    () => selectedFiles.filter((file) => file.state === 'missingInBackup'),
-    [selectedFiles],
+  const folderSummaryByPath = useMemo(
+    () => new Map((scanResult?.folders ?? []).map((folder) => [fileKey(folder.displayPath), folder.counts])),
+    [scanResult],
   );
-  const missingSelectedPaths = useMemo(() => {
-    const paths = new Set(missingSelectedFiles.map((file) => file.relativePath));
-
-    for (const file of scanResult?.files ?? []) {
-      if (file.state === 'missingInBackup' && isInsideSelectedFolderPath(file, selectedFolderPaths)) {
-        paths.add(file.relativePath);
-      }
-    }
-
-    return [...paths];
-  }, [missingSelectedFiles, scanResult, selectedFolderPaths]);
-  const cleanupSelectedFiles = useMemo(() => selectedFiles.filter(canCleanup), [selectedFiles]);
-  const conflictSelectedFiles = useMemo(
-    () => selectedFiles.filter((file) => file.state === 'conflictSamePathDifferentContent'),
-    [selectedFiles],
+  const copyCandidateByPath = useMemo(
+    () => new Map(missingFiles.map((file) => [fileKey(file.displayPath), file])),
+    [missingFiles],
   );
-  const selectedBytes = useMemo(
-    () => selectedFiles.reduce((total, file) => total + file.sizeBytes, 0),
-    [selectedFiles],
+  const cleanupCandidateByPath = useMemo(
+    () => new Map(backupOnlyFiles.map((file) => [fileKey(file.displayPath), file])),
+    [backupOnlyFiles],
   );
-  const lastCopyAt = useMemo(
-    () =>
-      operationHistory.find(
-        (snapshot) =>
-          snapshot.operation.type === 'copy' &&
-          snapshot.operation.state === 'completed' &&
-          snapshot.operation.completedAt,
-      )
-        ?.operation.completedAt ?? null,
-    [operationHistory],
+
+  const selectedCopyBytes = selectedCopyPaths.reduce(
+    (total, path) => total + (copyCandidateByPath.get(fileKey(path))?.sizeBytes ?? 0),
+    0,
   );
-  const lastCleanupAt = useMemo(
-    () =>
-      operationHistory.find(
-        (snapshot) =>
-          snapshot.operation.type === 'cleanup' &&
-          snapshot.operation.state === 'completed' &&
-          snapshot.operation.completedAt,
-      )
-        ?.operation.completedAt ?? null,
-    [operationHistory],
+  const selectedCopyFolderBytes = selectedCopyFolderPaths.reduce(
+    (total, path) => total + (folderSummaryByPath.get(fileKey(path))?.totalMissingSize ?? 0),
+    0,
   );
-  const reminderMessage = useMemo(() => {
-    if (!activePair?.reminderIntervalDays) {
-      return null;
-    }
-
-    if (!activePair.lastScanAt) {
-      return `SafeTwin reminder: this backup pair has not been scanned yet.`;
-    }
-
-    const elapsedDays = Math.floor((Date.now() - new Date(activePair.lastScanAt).getTime()) / 86_400_000);
-
-    if (elapsedDays >= activePair.reminderIntervalDays) {
-      return `SafeTwin reminder: your backup pair has not been scanned for ${elapsedDays} days.`;
-    }
-
-    return null;
-  }, [activePair]);
-  const liveStatusSummary = useMemo(() => {
-    const currentKey = normalizePath(leftPath).toLowerCase();
-    if (!scanResult) {
-      return null;
-    }
-
-    if (!currentKey) {
-      return scanResult.summary;
-    }
-
-    return (
-      scanResult.folders.find((folder) => normalizePath(folder.relativePath).toLowerCase() === currentKey)?.counts ??
-      null
-    );
-  }, [leftPath, scanResult]);
-  const statusSummary = liveStatusSummary ?? emptySummary();
-
-  const loadCachedPairResult = async (pairId: number) => {
-    const [status, operations, ignored] = await Promise.all([
-      window.safetwin.getLastStatus(pairId),
-      window.safetwin.listOperations(pairId),
-      window.safetwin.getIgnoredFiles(pairId),
-    ]);
-
-    setPairs([status.folderPair]);
-    setScanResult(status.lastScan);
-    setOperationHistory(operations);
-    setOperation(
-      operations.find((snapshot) => ['pending', 'running', 'paused'].includes(snapshot.operation.state)) ?? null,
-    );
-    setIgnoredFiles(ignored);
-  };
-
-  const savePairWithPaths = async (
-    nextOriginPath: string,
-    nextBackupPath: string,
-    nextPairName: string,
-    loadCachedResult = true,
-  ): Promise<FolderPair> => {
-    if (!nextOriginPath || !nextBackupPath) {
-      throw new Error('Choose both an origin folder and a recipient folder.');
-    }
-
-    const useCurrentPairId =
-      activePair?.originPath === nextOriginPath && activePair.backupPath === nextBackupPath ? activePairId : null;
-    const input: SaveFolderPairInput = {
-      id: useCurrentPairId ?? undefined,
-      name: nextPairName || getDefaultPairName(nextOriginPath, nextBackupPath),
-      originPath: nextOriginPath,
-      backupPath: nextBackupPath,
-      mirrorNavigationEnabled: activePair?.mirrorNavigationEnabled ?? true,
-      reminderIntervalDays: activePair?.reminderIntervalDays ?? null,
-    };
-    const savedPair = await window.safetwin.saveFolderPair(input);
-    setPairs([savedPair]);
-    setActivePairId(savedPair.id);
-    setOriginPath(savedPair.originPath);
-    setBackupPath(savedPair.backupPath);
-    setPairName(savedPair.name);
-
-    if (loadCachedResult) {
-      await loadCachedPairResult(savedPair.id);
-    }
-
-    return savedPair;
-  };
-
-  const scanSavedPair = async (pair: FolderPair, mode: ScanMode = 'metadata'): Promise<ScanResult | null> => {
-    setIsScanning(true);
-    setError(null);
-    setScanProgress({
-      folderPairId: pair.id,
-      scanRunId: null,
-      mode,
-      phase: 'starting',
-      side: 'both',
-      currentPath: '',
-      filesDiscovered: 0,
-      foldersDiscovered: 0,
-      ignored: 0,
-      skipped: 0,
-      message: 'Starting scan',
-    });
-
-    try {
-      const result = await window.safetwin.scanPair(pair.id, mode);
-      setScanResult(result);
-      setSelectedPaths([]);
-      setSelectedFolderPaths([]);
-      setCleanupPreview(null);
-      setPairs([{ ...pair, lastScanAt: result.completedAt }]);
-      setActivePairId(pair.id);
-      setIgnoredFiles(await window.safetwin.getIgnoredFiles(pair.id));
-      return result;
-    } catch (scanError) {
-      setError(toFriendlyError(scanError, 'Scan failed.'));
-      return null;
-    } finally {
-      setIsScanning(false);
-      window.setTimeout(() => setScanProgress(null), 1400);
-    }
-  };
-
-  const loadRememberedFolders = async () => {
-    const rememberedPair = await window.safetwin.getLastFolderPair();
-
-    if (!rememberedPair) {
-      return;
-    }
-
-    setPairs([rememberedPair]);
-    setActivePairId(rememberedPair.id);
-    setOriginPath(rememberedPair.originPath);
-    setBackupPath(rememberedPair.backupPath);
-    setPairName(rememberedPair.name);
-    setLeftPath('');
-    setRightPath('');
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCopyPreview(null);
-    setCleanupPreview(null);
-    setError(null);
-
-    await loadCachedPairResult(rememberedPair.id);
-  };
-
-  useEffect(() => {
-    Promise.all([window.safetwin.listIgnoreRules().then(setIgnoreRules), loadRememberedFolders()]).catch((loadError: unknown) => {
-      setError(toFriendlyError(loadError, 'Could not load SafeTwin data.'));
-    });
-  }, []);
-
-  useEffect(() => {
-    return window.safetwin.onScanProgress((progress) => {
-      setScanProgress(progress);
-    });
-  }, []);
+  const selectedCopyCount = selectedCopyPaths.length + selectedCopyFolderPaths.length;
+  const selectedDeleteBytes = selectedDeletePaths.reduce(
+    (total, path) => total + (cleanupCandidateByPath.get(fileKey(path))?.sizeBytes ?? 0),
+    0,
+  );
+  const selectedDeleteFolderBytes = selectedDeleteFolderPaths.reduce(
+    (total, path) => total + (folderSummaryByPath.get(fileKey(path))?.totalBackupOnlySize ?? 0),
+    0,
+  );
+  const selectedDeleteCount = selectedDeletePaths.length + selectedDeleteFolderPaths.length;
+  const cleanAllBytes = backupOnlyFiles.reduce((total, file) => total + file.sizeBytes, 0);
+  const cleanAllConfirmed = cleanAllConfirmText.trim().toUpperCase() === 'CLEAN ALL';
+  const operationPercent =
+    operation && operation.totals.bytesTotal > 0
+      ? Math.min(100, Math.round((operation.totals.bytesDone / operation.totals.bytesTotal) * 100))
+      : 0;
 
   useEffect(() => {
     window.localStorage.setItem('safetwin-theme', theme);
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem('safetwin-view-filter', filter);
-  }, [filter]);
+    window.safetwin
+      .getLastFolderPair()
+      .then((pair) => {
+        if (!pair) {
+          return;
+        }
+
+        setActivePair(pair);
+        setOriginPath(pair.originPath);
+        setBackupPath(pair.backupPath);
+        return window.safetwin.getLastStatus(pair.id);
+      })
+      .then((status) => {
+        if (status?.lastScan) {
+          setScanResult(status.lastScan);
+        }
+      })
+      .catch((loadError: unknown) => {
+        setError(toFriendlyError(loadError, 'Could not load the saved folder pair.'));
+      });
+
+    return window.safetwin.onScanProgress(setScanProgress);
+  }, []);
 
   useEffect(() => {
-    let canceled = false;
-
     if (!originPath) {
-      setOriginPreviewEntries([]);
-      return undefined;
+      setOriginEntries([]);
+      return;
     }
 
     window.safetwin
-      .listDirectory(originPath, leftPath)
+      .listDirectory(originPath, currentPath)
       .then((entries) => {
-        if (!canceled) {
-          setOriginPreviewEntries(entries);
-        }
+        setOriginEntries(entries);
       })
-      .catch((previewError: unknown) => {
-        if (!canceled) {
-          setOriginPreviewEntries([]);
-          setError(toFriendlyError(previewError, 'Could not read origin folder.'));
+      .catch((listError: unknown) => {
+        setOriginEntries([]);
+        if (!isMissingDirectoryError(listError)) {
+          setError(toFriendlyError(listError, 'Could not read the origin folder.'));
         }
       });
-
-    return () => {
-      canceled = true;
-    };
-  }, [leftPath, originPath, refreshToken]);
+  }, [currentPath, originPath, refreshToken]);
 
   useEffect(() => {
-    let canceled = false;
-
     if (!backupPath) {
-      setBackupPreviewEntries([]);
-      return undefined;
+      setBackupEntries([]);
+      return;
     }
 
     window.safetwin
-      .listDirectory(backupPath, rightPath)
+      .listDirectory(backupPath, currentPath)
       .then((entries) => {
-        if (!canceled) {
-          setBackupPreviewEntries(entries);
-        }
+        setBackupEntries(entries);
       })
-      .catch((previewError: unknown) => {
-        if (!canceled) {
-          setBackupPreviewEntries([]);
-          setError(toFriendlyError(previewError, 'Could not read recipient folder.'));
+      .catch((listError: unknown) => {
+        setBackupEntries([]);
+        if (!isMissingDirectoryError(listError)) {
+          setError(toFriendlyError(listError, 'Could not read the backup folder.'));
         }
       });
-
-    return () => {
-      canceled = true;
-    };
-  }, [backupPath, refreshToken, rightPath]);
+  }, [backupPath, currentPath, refreshToken]);
 
   useEffect(() => {
-    if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
+    if (!operation || isTerminalOperationState(operation.operation.state)) {
       return undefined;
     }
 
-    const intervalId = window.setInterval(() => {
+    const interval = window.setInterval(() => {
       window.safetwin
         .getOperation(operation.operation.id)
-        .then(async (nextOperation) => {
-          setOperation(nextOperation);
-
-          if (nextOperation.operation.state === 'completed' && activePairId) {
-            const status = await window.safetwin.getLastStatus(activePairId);
-            setPairs([status.folderPair]);
-            setScanResult(status.lastScan);
-            setSelectedPaths([]);
-            setSelectedFolderPaths([]);
-            setCopyPreview(null);
-            setCleanupPreview(null);
-            setOperationHistory(await window.safetwin.listOperations(activePairId));
-            setRefreshToken((current) => current + 1);
+        .then((snapshot) => {
+          setOperation(snapshot);
+          if (isTerminalOperationState(snapshot.operation.state)) {
+            const verb = operationVerb(snapshot);
+            const failedText = snapshot.totals.failedItems > 0 ? `, ${snapshot.totals.failedItems} failed` : '';
+            setActionMessage(
+              `${verb} ${snapshot.operation.state}: ${snapshot.totals.completedItems}/${snapshot.totals.totalItems} items${failedText}.`,
+            );
+            setRefreshToken((token) => token + 1);
+            if (activePair) {
+              window.safetwin
+                .getLastStatus(activePair.id)
+                .then((status) => setScanResult(status.lastScan))
+                .catch(() => undefined);
+            }
           }
         })
-        .catch((pollError: unknown) => {
-          setError(toFriendlyError(pollError, 'Could not refresh operation.'));
-        });
-    }, 700);
+        .catch(() => undefined);
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [activePair, operation]);
+
+  useEffect(() => {
+    if (!itemContextMenu) {
+      return undefined;
+    }
+
+    const closeMenu = () => {
+      setItemContextMenu(null);
+    };
+
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('keydown', closeMenu);
+    window.addEventListener('resize', closeMenu);
 
     return () => {
-      window.clearInterval(intervalId);
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('keydown', closeMenu);
+      window.removeEventListener('resize', closeMenu);
     };
-  }, [activePairId, operation]);
+  }, [itemContextMenu]);
+
+  const savePair = async (nextOriginPath: string, nextBackupPath: string): Promise<FolderPair> => {
+    if (!nextOriginPath || !nextBackupPath) {
+      throw new Error('Choose both an origin folder and a backup folder.');
+    }
+
+    const input: SaveFolderPairInput = {
+      id:
+        activePair?.originPath === nextOriginPath && activePair.backupPath === nextBackupPath
+          ? activePair.id
+          : undefined,
+      name: pairName(nextOriginPath, nextBackupPath),
+      originPath: nextOriginPath,
+      backupPath: nextBackupPath,
+      mirrorNavigationEnabled: true,
+      reminderIntervalDays: null,
+    };
+    const savedPair = await window.safetwin.saveFolderPair(input);
+    setActivePair(savedPair);
+    setOriginPath(savedPair.originPath);
+    setBackupPath(savedPair.backupPath);
+    return savedPair;
+  };
 
   const chooseFolder = async (side: PaneSide) => {
     const result = await window.safetwin.chooseFolder();
@@ -1187,949 +311,603 @@ const App = () => {
 
     const nextOriginPath = side === 'origin' ? result.path : originPath;
     const nextBackupPath = side === 'backup' ? result.path : backupPath;
-    const nextPairName = nextOriginPath && nextBackupPath ? getDefaultPairName(nextOriginPath, nextBackupPath) : '';
-
+    setError(null);
+    setCurrentPath('');
+    setSelectedCopyPaths([]);
+    setSelectedCopyFolderPaths([]);
+    setSelectedDeletePaths([]);
+    setSelectedDeleteFolderPaths([]);
     setOriginPath(nextOriginPath);
     setBackupPath(nextBackupPath);
-    setPairName(nextPairName);
-    setLeftPath('');
-    setRightPath('');
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCleanupPreview(null);
-    setScanResult(null);
-    setError(null);
 
     if (nextOriginPath && nextBackupPath) {
       try {
-        await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
-      } catch (folderError) {
-        setError(toFriendlyError(folderError, 'Could not use selected folders.'));
+        const savedPair = await savePair(nextOriginPath, nextBackupPath);
+        await runScan(savedPair);
+      } catch (folderError: unknown) {
+        setError(toFriendlyError(folderError, 'Could not save or scan the selected folders.'));
       }
     }
   };
 
-  const swapRoles = async () => {
-    if (!originPath || !backupPath) {
-      setError('Choose both an origin folder and a recipient folder before swapping roles.');
+  const runScan = async (pair = activePair, mode: 'metadata' | 'deep' = 'metadata') => {
+    if (!pair) {
+      throw new Error('Choose both folders first.');
+    }
+
+    setIsBusy(true);
+    setError(null);
+    try {
+      setActionMessage(mode === 'deep' ? 'Full scan started: rebuilding the complete diff from disk.' : 'Refreshing diff from disk.');
+      const result = await window.safetwin.scanPair(pair.id, mode);
+      setScanResult(result);
+      setScanProgress(null);
+      setRefreshToken((token) => token + 1);
+      setActionMessage(
+        mode === 'deep'
+          ? `Full scan completed: ${result.summary.missingInBackup} missing, ${result.summary.backupOnly} extra, ${result.summary.conflicts} different.`
+          : `Diff refreshed: ${result.summary.missingInBackup} missing, ${result.summary.backupOnly} extra, ${result.summary.conflicts} different.`,
+      );
+      return result;
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const startOperation = async (snapshot: OperationSnapshot) => {
+    setActionMessage(
+      `${operationVerb(snapshot)} queued: ${snapshot.totals.totalItems} items, ${formatBytes(snapshot.totals.bytesTotal)}.`,
+    );
+    setOperation(snapshot);
+    const started = await window.safetwin.startOperation(snapshot.operation.id);
+    setActionMessage(
+      `${operationVerb(started)} running: ${started.totals.totalItems} items, ${formatBytes(started.totals.bytesTotal)}.`,
+    );
+    setOperation(started);
+  };
+
+  const stopOperation = async () => {
+    if (!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)) {
       return;
     }
 
-    const nextOriginPath = backupPath;
-    const nextBackupPath = originPath;
-    const nextPairName = getDefaultPairName(nextOriginPath, nextBackupPath);
-    setOriginPath(nextOriginPath);
-    setBackupPath(nextBackupPath);
-    setPairName(nextPairName);
-    setLeftPath('');
-    setRightPath('');
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCopyPreview(null);
-    setCleanupPreview(null);
-    setScanResult(null);
+    setError(null);
+    try {
+      const cancelled = await window.safetwin.cancelOperation(operation.operation.id);
+      setOperation(cancelled);
+      setActionMessage(`Stopped ${operationVerb(cancelled).toLowerCase()}: ${cancelled.totals.cancelledItems} items cancelled.`);
+      setRefreshToken((token) => token + 1);
+    } catch (stopError: unknown) {
+      setError(toFriendlyError(stopError, 'Could not stop the current operation.'));
+    }
+  };
+
+  const refreshAfterManualFileChange = async () => {
+    setRefreshToken((token) => token + 1);
+
+    if (activePair) {
+      try {
+        await runScan(activePair);
+      } catch (scanError: unknown) {
+        setError(toFriendlyError(scanError, 'File was changed, but the diff refresh failed.'));
+      }
+    }
+  };
+
+  const deleteContextItem = async (menu: ItemContextMenu) => {
+    const itemLabel = menu.entry.kind === 'folder' ? 'folder and everything inside it' : 'file';
+    const confirmed = window.confirm(`Move this ${itemLabel} to Recycle Bin?\n\n${menu.entry.absolutePath}`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsBusy(true);
     setError(null);
 
     try {
-      await savePairWithPaths(nextOriginPath, nextBackupPath, nextPairName);
-    } catch (swapError) {
-      setError(toFriendlyError(swapError, 'Could not swap origin and backup.'));
+      const trashResult = await window.safetwin.trashItem({
+        rootPath: menu.rootPath,
+        itemPath: menu.entry.absolutePath,
+      });
+      setActionMessage(
+        trashResult.method === 'recycleBin'
+          ? `Moved ${menu.entry.kind} to Recycle Bin: ${menu.entry.name}.`
+          : `Windows Recycle Bin refused it, so SafeTwin moved ${menu.entry.kind} to local trash: ${menu.entry.name}.`,
+      );
+      setSelectedCopyPaths((paths) => paths.filter((selectedPath) => selectedPath !== menu.entry.relativePath));
+      setSelectedCopyFolderPaths((paths) => paths.filter((selectedPath) => selectedPath !== menu.entry.relativePath));
+      setSelectedDeletePaths((paths) => paths.filter((selectedPath) => selectedPath !== menu.entry.relativePath));
+      setSelectedDeleteFolderPaths((paths) => paths.filter((selectedPath) => selectedPath !== menu.entry.relativePath));
+      await refreshAfterManualFileChange();
+    } catch (deleteError: unknown) {
+      setError(toFriendlyError(deleteError, 'Could not move the item to Recycle Bin.'));
+    } finally {
+      setIsBusy(false);
     }
   };
 
-  const savePair = async (loadCachedResult = true): Promise<FolderPair> => {
-    return savePairWithPaths(
-      originPath,
-      backupPath,
-      pairName || getDefaultPairName(originPath, backupPath),
-      loadCachedResult,
-    );
-  };
-
-  const scan = async (mode: ScanMode = 'metadata') => {
-    try {
-      const savedPair = await savePair(false);
-      await scanSavedPair(savedPair, mode);
-    } catch (scanError) {
-      setError(toFriendlyError(scanError, 'Scan failed.'));
-    }
-  };
-
-  const navigatePane = (side: PaneSide, nextPath: string) => {
-    const normalized = normalizePath(nextPath);
-
-    if (side === 'origin') {
-      setLeftPath(normalized);
-      if (activePair?.mirrorNavigationEnabled) {
-        setRightPath(normalized);
-      }
-    } else {
-      setRightPath(normalized);
-      if (activePair?.mirrorNavigationEnabled) {
-        setLeftPath(normalized);
-      }
-    }
-  };
-
-  const toggleCleanupMode = () => {
-    const nextCleanupMode = !cleanupMode;
-
-    setCleanupMode(nextCleanupMode);
-    setSelectionMode(nextCleanupMode);
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCopyPreview(null);
-    setCleanupPreview(null);
-  };
-
-  const updatePairSettings = async (patch: { mirrorNavigationEnabled?: boolean; reminderIntervalDays?: number | null }) => {
-    if (!activePairId) {
+  const copyPaths = async (paths: string[], folderPaths: string[] = []) => {
+    if (!activePair || (paths.length === 0 && folderPaths.length === 0)) {
       return;
     }
 
+    setIsBusy(true);
+    setError(null);
+    const selectedCount = paths.length + folderPaths.length;
+    setActionMessage(`Copy requested now: ${selectedCount} selected items. Verifying current diff before copying.`);
     try {
-      const updatedPair = await window.safetwin.updateFolderPairSettings({ id: activePairId, ...patch });
-      setPairs((current) => current.map((pair) => (pair.id === updatedPair.id ? updatedPair : pair)));
-    } catch (settingsError) {
-      setError(toFriendlyError(settingsError, 'Could not update settings.'));
+      const latestScan = await runScan(activePair);
+      const stillCopyable = new Set(
+        latestScan.files.filter((file) => file.state === 'missingInBackup').map((file) => fileKey(file.relativePath)),
+      );
+      const selectedRelativePaths = paths.filter((path) => stillCopyable.has(fileKey(path)));
+      const snapshot = await window.safetwin.createCopyOperation({
+        folderPairId: activePair.id,
+        selectedRelativePaths,
+        selectedFolderPaths: folderPaths,
+        includeConflictsAsDuplicates: false,
+        verificationLevel: 'auto',
+      });
+      await startOperation(snapshot);
+      setSelectedCopyPaths([]);
+      setSelectedCopyFolderPaths([]);
+      setCleanAllConfirmOpen(false);
+      setCleanAllConfirmText('');
+    } catch (copyError: unknown) {
+      setError(toFriendlyError(copyError, 'Could not copy files.'));
+    } finally {
+      setIsBusy(false);
     }
   };
 
-  const toggleSelectedPath = (file: FileCompareItem) => {
-    const isEligible = cleanupMode ? canCleanup(file) : canCopy(file);
-
-    if (!isEligible) {
+  const deletePaths = async (paths: string[], folderPaths: string[] = []) => {
+    if (!activePair || (paths.length === 0 && folderPaths.length === 0)) {
       return;
     }
 
-    setSelectedPaths((current) =>
-      current.includes(file.relativePath)
-        ? current.filter((relativePath) => relativePath !== file.relativePath)
-        : [...current, file.relativePath],
-    );
+    setIsBusy(true);
+    setError(null);
+    const selectedCount = paths.length + folderPaths.length;
+    setActionMessage(`Delete requested now: ${selectedCount} selected items. Verifying current diff before moving to Recycle Bin.`);
+    try {
+      await runScan(activePair);
+      const snapshot = await window.safetwin.createCleanupOperation({
+        folderPairId: activePair.id,
+        selectedRelativePaths: paths,
+        selectedFolderPaths: folderPaths,
+      });
+      await startOperation(snapshot);
+      setSelectedDeletePaths([]);
+      setSelectedDeleteFolderPaths([]);
+      setCleanAllConfirmOpen(false);
+      setCleanAllConfirmText('');
+    } catch (deleteError: unknown) {
+      setError(toFriendlyError(deleteError, 'Could not delete backup files.'));
+    } finally {
+      setIsBusy(false);
+    }
   };
 
-  const toggleSelectedFolderPath = (relativePath: string) => {
-    setSelectedFolderPaths((current) =>
+  const invertRoles = async () => {
+    if (!originPath || !backupPath) {
+      setError('Choose both folders before using Invert.');
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    try {
+      const savedPair = await savePair(backupPath, originPath);
+      setCurrentPath('');
+      setSelectedCopyPaths([]);
+      setSelectedCopyFolderPaths([]);
+      setSelectedDeletePaths([]);
+      setSelectedDeleteFolderPaths([]);
+      await runScan(savedPair);
+    } catch (invertError: unknown) {
+      setError(toFriendlyError(invertError, 'Could not invert the folder roles.'));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const toggleSelected = (side: PaneSide, relativePath: string) => {
+    const setter = side === 'origin' ? setSelectedCopyPaths : setSelectedDeletePaths;
+    setter((current) =>
       current.includes(relativePath)
         ? current.filter((selectedPath) => selectedPath !== relativePath)
         : [...current, relativePath],
     );
   };
 
-  const rowIsSelectable = (row: PaneRow): boolean => {
-    if (row.kind === 'file') {
-      return cleanupMode ? canCleanup(row.file) : canBackUpMissing(row.file);
-    }
-
-    if (row.kind !== 'folder') {
-      return false;
-    }
-
-    if (cleanupMode) {
-      return row.side === 'backup' && row.counts.backupOnly > 0;
-    }
-
-    return row.side === 'origin' && row.counts.missingInBackup > 0;
+  const toggleCopyFolderSelected = (relativePath: string) => {
+    setSelectedCopyFolderPaths((current) =>
+      current.includes(relativePath)
+        ? current.filter((selectedPath) => selectedPath !== relativePath)
+        : [...current, relativePath],
+    );
   };
 
-  const selectVisibleEligible = () => {
-    const paths = new Set(selectedPaths);
-    const folderPaths = new Set(selectedFolderPaths);
-
-    for (const row of [...leftRows, ...rightRows]) {
-      if (row.kind === 'file' && rowIsSelectable(row)) {
-        paths.add(row.file.relativePath);
-      }
-
-      if (row.kind === 'folder' && rowIsSelectable(row)) {
-        folderPaths.add(row.relativePath);
-      }
-    }
-
-    setSelectionMode(true);
-    setSelectedPaths([...paths]);
-    setSelectedFolderPaths([...folderPaths]);
-    setCleanupPreview(null);
-    setCopyPreview(null);
+  const toggleDeleteFolderSelected = (relativePath: string) => {
+    setSelectedDeleteFolderPaths((current) =>
+      current.includes(relativePath)
+        ? current.filter((selectedPath) => selectedPath !== relativePath)
+        : [...current, relativePath],
+    );
   };
 
-  const clearSelection = () => {
-    setSelectedPaths([]);
-    setSelectedFolderPaths([]);
-    setCleanupPreview(null);
-    setCopyPreview(null);
-  };
-
-  const ensureScanIncludesSelection = async (paths: string[], folderPaths: string[] = []): Promise<void> => {
-    if (!activePairId || !originPath || !backupPath) {
-      return;
-    }
-
-    const scannedPaths = new Set((scanResult?.files ?? []).map((file) => normalizePath(file.relativePath).toLowerCase()));
-    const needsFreshScan =
-      folderPaths.length > 0 || paths.some((relativePath) => !scannedPaths.has(normalizePath(relativePath).toLowerCase()));
-
-    if (!needsFreshScan) {
-      return;
-    }
-
-    const savedPair = await savePair();
-    await scanSavedPair(savedPair);
-  };
-
-  const startCopyOperation = async (
-    folderPairId: number,
-    paths: string[],
-    folderPaths: string[],
-    includeConflictsAsDuplicates = false,
+  const renderPane = (
+    side: PaneSide,
+    entries: DirectoryPreviewEntry[],
+    rootPath: string,
+    oppositeEntries: DirectoryPreviewEntry[],
   ) => {
-    setIsPreparingOperation(true);
-    setError(null);
+    const isOrigin = side === 'origin';
+    const selectedPaths = isOrigin ? selectedCopyPaths : selectedDeletePaths;
+    const markerMap = isOrigin ? copyCandidateByPath : cleanupCandidateByPath;
+    const oppositeEntryKeys = new Set(oppositeEntries.map((entry) => fileKey(entry.relativePath)));
 
-    try {
-      const nextOperation = await window.safetwin.createCopyOperation({
-        folderPairId,
-        selectedRelativePaths: paths,
-        selectedFolderPaths: folderPaths,
-        verificationLevel,
-        includeConflictsAsDuplicates,
-      });
-      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
-      setOperation(startedOperation);
-      setOperationHistory((current) => [
-        startedOperation,
-        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
-      ]);
-      if (startedOperation.operation.state === 'failed') {
-        const firstError = startedOperation.items.find((item) => item.state === 'failed')?.errorMessage;
-        setError(firstError ?? 'Backup failed.');
-        setCopyPreview(null);
-      } else {
-        setCopyPreview({
-          filesSelected: nextOperation.totals.totalItems,
-          conflictsSelected: nextOperation.items.filter((item) => item.action === 'copyConflictDuplicate').length,
-          totalSize: nextOperation.totals.bytesTotal,
-        });
-      }
-      setCleanupMode(false);
-      setCleanupPreview(null);
-    } catch (operationError) {
-      setError(toFriendlyError(operationError, 'Could not create backup queue.'));
-    } finally {
-      setIsPreparingOperation(false);
-    }
-  };
+    return (
+      <section className={`pane pane-${side}`}>
+        <header className="pane-header">
+          <div>
+            <strong>{isOrigin ? 'Origin folder' : 'Backup folder'}</strong>
+            <button type="button" className="folder-picker" onClick={() => chooseFolder(side)}>
+              <FolderOpen size={15} aria-hidden="true" />
+              <span>{rootPath || `Choose ${isOrigin ? 'origin' : 'backup'}`}</span>
+            </button>
+          </div>
+        </header>
 
-  const createCopyQueue = async (
-    paths: string[],
-    folderPaths: string[] = [],
-    includeConflictsAsDuplicates = false,
-  ) => {
-    if (!activePairId || (paths.length === 0 && folderPaths.length === 0)) {
-      return;
-    }
-
-    if (!scanResult) {
-      setError('Run Scan once to build the missing-files list. SafeTwin will reuse that cached scan after that.');
-      return;
-    }
-
-    await startCopyOperation(activePairId, paths, folderPaths, includeConflictsAsDuplicates);
-  };
-
-  const createSingleCopyQueue = async (relativePath: string, action: CopyAction) => {
-    if (!activePairId) {
-      return;
-    }
-
-    setIsPreparingOperation(true);
-    setError(null);
-
-    try {
-      const nextOperation = await window.safetwin.createSingleCopyOperation({
-        folderPairId: activePairId,
-        relativePath,
-        action,
-        verificationLevel,
-      });
-      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
-      setOperation(startedOperation);
-      setOperationHistory((current) => [
-        startedOperation,
-        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
-      ]);
-      if (startedOperation.operation.state === 'failed') {
-        const firstError = startedOperation.items.find((item) => item.state === 'failed')?.errorMessage;
-        setError(firstError ?? 'Backup failed.');
-        setCopyPreview(null);
-      } else {
-        setCopyPreview({
-          filesSelected: 1,
-          conflictsSelected: action === 'copyConflictDuplicate' ? 1 : 0,
-          totalSize: nextOperation.totals.bytesTotal,
-        });
-      }
-      setCleanupMode(false);
-      setCleanupPreview(null);
-    } catch (operationError) {
-      setError(toFriendlyError(operationError, 'Could not back up this file.'));
-    } finally {
-      setIsPreparingOperation(false);
-    }
-  };
-
-  const previewCleanup = async () => {
-    if (!activePairId) {
-      return;
-    }
-
-    setIsPreparingOperation(true);
-    setError(null);
-
-    try {
-      await ensureScanIncludesSelection(
-        cleanupSelectedFiles.map((file) => file.relativePath),
-        selectedFolderPaths,
-      );
-      const preview = await window.safetwin.createCleanupPreview({
-        folderPairId: activePairId,
-        selectedRelativePaths: cleanupSelectedFiles.map((file) => file.relativePath),
-        selectedFolderPaths,
-      });
-      setCleanupPreview(preview);
-      setCopyPreview(null);
-    } catch (previewError) {
-      setError(toFriendlyError(previewError, 'Could not create cleanup preview.'));
-    } finally {
-      setIsPreparingOperation(false);
-    }
-  };
-
-  const createCleanupQueue = async () => {
-    if (!activePairId) {
-      return;
-    }
-
-    setIsPreparingOperation(true);
-    setError(null);
-
-    try {
-      const nextOperation = await window.safetwin.createCleanupOperation({
-        folderPairId: activePairId,
-        selectedRelativePaths: cleanupSelectedFiles.map((file) => file.relativePath),
-        selectedFolderPaths,
-      });
-      const startedOperation = await window.safetwin.startOperation(nextOperation.operation.id);
-      setOperation(startedOperation);
-      setOperationHistory((current) => [
-        startedOperation,
-        ...current.filter((item) => item.operation.id !== startedOperation.operation.id),
-      ]);
-      setCopyPreview(null);
-      setCleanupPreview(null);
-    } catch (operationError) {
-      setError(toFriendlyError(operationError, 'Could not create cleanup queue.'));
-    } finally {
-      setIsPreparingOperation(false);
-    }
-  };
-
-  const runOperationCommand = async (command: 'start' | 'pause' | 'resume' | 'cancel' | 'retry') => {
-    if (!operation) {
-      return;
-    }
-
-    try {
-      let nextOperation =
-        command === 'start'
-          ? await window.safetwin.startOperation(operation.operation.id)
-          : command === 'pause'
-            ? await window.safetwin.pauseOperation(operation.operation.id)
-            : command === 'resume'
-              ? await window.safetwin.resumeOperation(operation.operation.id)
-              : command === 'cancel'
-                ? await window.safetwin.cancelOperation(operation.operation.id)
-                : await window.safetwin.retryFailedOperation(operation.operation.id);
-
-      if (command === 'retry') {
-        nextOperation = await window.safetwin.startOperation(nextOperation.operation.id);
-      }
-
-      setOperation(nextOperation);
-      setOperationHistory((current) => [nextOperation, ...current.filter((item) => item.operation.id !== nextOperation.operation.id)]);
-    } catch (commandError) {
-      setError(toFriendlyError(commandError, 'Operation command failed.'));
-    }
-  };
-
-  const runMoreAction = (action: string) => {
-    if (action === 'swap') {
-      void swapRoles();
-      return;
-    }
-
-    if (action === 'selectVisible') {
-      selectVisibleEligible();
-      return;
-    }
-
-    if (action === 'clearSelection') {
-      clearSelection();
-      return;
-    }
-
-    if (action === 'copyConflicts') {
-      void createCopyQueue(conflictSelectedFiles.map((file) => file.relativePath), [], true);
-    }
-  };
-
-  const groupedIgnoreRules = useMemo(() => {
-    const groups = new Map<string, IgnoreRuleSetting[]>();
-
-    for (const rule of ignoreRules) {
-      groups.set(rule.category, [...(groups.get(rule.category) ?? []), rule]);
-    }
-
-    return [...groups.entries()];
-  }, [ignoreRules]);
-
-  const renderPane = (side: PaneSide, rows: PaneRow[], pathValue: string, rootPath: string) => (
-    <section className="pane">
-      <header className="pane-header">
-        <div>
-          <strong>{side === 'origin' ? 'ORIGIN' : 'RECIPIENT'}</strong>
-          <span>{rootPath || `No ${side === 'origin' ? 'origin' : 'recipient'} folder selected`}</span>
+        <div className="breadcrumb">
+          <button type="button" disabled={!currentPath} onClick={() => setCurrentPath(parentPath(currentPath))}>
+            Up
+          </button>
+          <span>{currentPath || 'Root'}</span>
         </div>
-        <button type="button" title={`Choose ${side} folder`} onClick={() => chooseFolder(side)}>
-          <FolderOpen size={16} aria-hidden="true" />
-        </button>
-      </header>
 
-      <div className="breadcrumb">
-        <button type="button" title="Back" onClick={() => navigatePane(side, parentPath(pathValue))}>
-          <ChevronLeft size={15} aria-hidden="true" />
-        </button>
-        <button type="button" className="breadcrumb-path" title="Go to root" onClick={() => navigatePane(side, '')}>
-          {pathValue ? `Root / ${pathValue}` : 'Root'}
-        </button>
-      </div>
+        <div className="file-list">
+          {entries.map((entry) => {
+            const key = fileKey(entry.relativePath);
+            const markedFile = entry.kind === 'file' ? markerMap.get(key) : null;
+            const conflictFile = entry.kind === 'file' ? conflictByPath.get(key) : null;
+            const folderSummary = entry.kind === 'folder' ? folderSummaryByPath.get(key) : null;
+            const shouldShowPlus =
+              isOrigin &&
+              ((entry.kind === 'file' && Boolean(markedFile)) ||
+                (entry.kind === 'folder' && Boolean(folderSummary && folderSummary.missingInBackup > 0)));
+            const shouldShowMinus =
+              !isOrigin &&
+              ((entry.kind === 'file' && Boolean(markedFile)) ||
+                (entry.kind === 'folder' && Boolean(folderSummary && folderSummary.backupOnly > 0)));
+            const shouldShowChanged =
+              (entry.kind === 'file' && Boolean(conflictFile)) ||
+              (entry.kind === 'folder' && Boolean(folderSummary && folderSummary.conflicts > 0));
+            const shouldShowCheck =
+              entry.kind === 'folder' && Boolean(folderSummary && !folderHasDiff(folderSummary));
+            const isOriginOnlyFolder =
+              isOrigin &&
+              entry.kind === 'folder' &&
+              !oppositeEntryKeys.has(key) &&
+              Boolean(folderSummary && folderSummary.missingInBackup > 0);
+            const isBackupOnlyFolder =
+              !isOrigin &&
+              entry.kind === 'folder' &&
+              !oppositeEntryKeys.has(key) &&
+              Boolean(folderSummary && folderSummary.backupOnly > 0);
+            const canSelectFile = entry.kind === 'file' && Boolean(markedFile);
+            const canSelectFolder = isOriginOnlyFolder || isBackupOnlyFolder;
+            const selected =
+              entry.kind === 'folder'
+                ? isOrigin
+                  ? selectedCopyFolderPaths.includes(entry.relativePath)
+                  : selectedDeleteFolderPaths.includes(entry.relativePath)
+                : selectedPaths.includes(entry.relativePath);
 
-      <div className="pane-list">
-        {rows.map((row) => {
-          const selected = row.kind === 'file' && selectedPaths.includes(row.relativePath);
-          const folderSelected = row.kind === 'folder' && selectedFolderPaths.includes(row.relativePath);
-          const eligible = rowIsSelectable(row);
-          const isFolderRow = row.kind === 'folder' || row.kind === 'previewFolder' || row.kind === 'parent';
-          const copyAction: CopyAction | null =
-            !cleanupMode && row.kind === 'file' && side === 'origin' && canCopy(row.file)
-              ? row.file.state === 'conflictSamePathDifferentContent'
-                ? 'copyConflictDuplicate'
-                : 'copyMissing'
-              : null;
-          const copyPath = copyAction ? row.relativePath : null;
-          const activeCopyItem = copyPath ? operationByPath.get(normalizePath(copyPath).toLowerCase()) ?? null : null;
-          const copyDisabledByOperation = activeCopyItem
-            ? !['failed', 'cancelled'].includes(activeCopyItem.state)
-            : false;
-          const copyButtonLabel =
-            copyAction === 'copyConflictDuplicate'
-              ? 'Save duplicate'
-              : 'Back up file';
-          const rowClasses = ['explorer-row'];
+            return (
+              <div className="file-row" key={`${side}-${entry.relativePath}`}>
+                <span className="check-cell">
+                  {canSelectFile || canSelectFolder ? (
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => {
+                        if (entry.kind === 'folder') {
+                          if (isOrigin) {
+                            toggleCopyFolderSelected(entry.relativePath);
+                            return;
+                          }
 
-          if (selected || folderSelected) {
-            rowClasses.push('explorer-row-selected');
-          }
+                          toggleDeleteFolderSelected(entry.relativePath);
+                          return;
+                        }
 
-          if (
-            (row.kind === 'file' && row.file.state === 'missingInBackup') ||
-            (row.kind === 'folder' && side === 'origin' && row.counts.missingInBackup > 0) ||
-            row.kind === 'missingPlaceholder'
-          ) {
-            rowClasses.push('explorer-row-missing');
-          }
-
-          const activateRow = () => {
-            if (isFolderRow) {
-              navigatePane(side, row.relativePath);
-            } else if (row.kind === 'file' && selectionMode) {
-              toggleSelectedPath(row.file);
-            }
-          };
-          const openItemLocation = () => {
-            if (row.kind !== 'file' && row.kind !== 'previewFile') {
-              return;
-            }
-
-            const itemPath = row.kind === 'file' ? sidePath(row.file, side) : row.absolutePath;
-
-            if (itemPath) {
-              window.safetwin.showItemInFolder(itemPath).catch((openError: unknown) => {
-                setError(toFriendlyError(openError, 'Could not open item folder.'));
-              });
-            }
-          };
-
-          return (
-            <div
-              className={rowClasses.join(' ')}
-              key={`${side}-${row.kind}-${row.relativePath}`}
-              role="button"
-              tabIndex={0}
-              onClick={activateRow}
-              onDoubleClick={openItemLocation}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  activateRow();
-                }
-              }}
-            >
-              <span className="row-select">
-                {selectionMode && row.kind === 'file' ? (
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    disabled={!eligible}
-                    onChange={() => toggleSelectedPath(row.file)}
-                    onClick={(event) => event.stopPropagation()}
-                    aria-label={`Select ${row.name}`}
-                  />
-                ) : selectionMode && row.kind === 'folder' ? (
-                  <input
-                    type="checkbox"
-                    checked={folderSelected}
-                    disabled={!eligible}
-                    onChange={() => toggleSelectedFolderPath(row.relativePath)}
-                    onClick={(event) => event.stopPropagation()}
-                    aria-label={`Select folder ${row.name}`}
-                  />
-                ) : null}
-              </span>
-              <span className="row-icon">
-                {row.kind === 'parent' ? (
-                  <ChevronLeft size={16} aria-hidden="true" />
-                ) : row.kind === 'folder' || row.kind === 'previewFolder' ? (
-                  <Folder size={16} aria-hidden="true" />
-                ) : (
-                  getFileIcon(row.relativePath)
-                )}
-              </span>
-              <span className="row-name">{row.name}</span>
-              <span className="row-action">
-                {copyPath && copyAction ? (
-                  <button
-                    type="button"
-                    title={
-                      row.kind === 'file' && row.file.state === 'conflictSamePathDifferentContent'
-                        ? 'Save this Origin conflict as a renamed duplicate in Recipient'
-                        : 'Back up this missing Origin file to Recipient'
+                        toggleSelected(side, entry.relativePath);
+                      }}
+                      aria-label={`Select ${entry.name}`}
+                    />
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className="file-main"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setItemContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      side,
+                      entry,
+                      rootPath,
+                    });
+                  }}
+                  onClick={() => {
+                    if (entry.kind === 'folder') {
+                      setCurrentPath(normalizePath(entry.relativePath));
+                    } else if (canSelectFile) {
+                      toggleSelected(side, entry.relativePath);
                     }
-                    disabled={isPreparingOperation || copyDisabledByOperation}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void createSingleCopyQueue(copyPath, copyAction);
-                    }}
-                  >
-                    <HardDrive size={13} aria-hidden="true" />
-                    {activeCopyItem?.state === 'completed'
-                      ? 'Backed up'
-                      : activeCopyItem && ['pending', 'running', 'paused'].includes(activeCopyItem.state)
-                        ? 'Backing up'
-                        : copyButtonLabel}
-                  </button>
-                ) : null}
-              </span>
-              <span className="row-status">{indicatorFor(row, side)}</span>
-              <span className="row-size">
-                {row.kind === 'file'
-                  ? formatBytes(row.file.sizeBytes)
-                  : row.kind === 'previewFile'
-                    ? formatBytes(row.sizeBytes)
-                    : row.kind === 'missingPlaceholder'
-                      ? 'Missing'
-                    : ''}
-              </span>
-            </div>
-          );
-        })}
-
-        {rows.length === 0 ? <div className="empty-pane">No items at this level</div> : null}
-      </div>
-    </section>
-  );
+                  }}
+                >
+                  <span className={`file-icon ${entry.kind}`}>{entry.kind === 'folder' ? 'Folder' : 'File'}</span>
+                  <span className="file-name">{entry.name}</span>
+                  <span className="file-size">{entry.kind === 'file' ? formatBytes(entry.sizeBytes) : ''}</span>
+                  {shouldShowPlus || shouldShowMinus || shouldShowChanged || shouldShowCheck ? (
+                    <span
+                      className={`corner-marker ${
+                        shouldShowCheck
+                          ? 'same-marker'
+                          : shouldShowChanged
+                            ? 'changed-marker'
+                            : shouldShowPlus
+                              ? 'copy-marker'
+                              : 'delete-marker'
+                      }`}
+                      title={
+                        shouldShowCheck
+                          ? 'This folder is fully identical'
+                          : shouldShowChanged
+                            ? 'Same path exists on both sides, but the file content or modified time is different'
+                            : shouldShowPlus
+                              ? 'This folder or file is missing from backup'
+                              : 'This folder or file exists only in backup'
+                      }
+                    >
+                      {shouldShowCheck ? (
+                        <Check size={13} strokeWidth={3} aria-hidden="true" />
+                      ) : shouldShowChanged ? (
+                        '!'
+                      ) : shouldShowPlus ? (
+                        '+'
+                      ) : (
+                        '-'
+                      )}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
+            );
+          })}
+          {entries.length === 0 ? <div className="empty-pane">No files here.</div> : null}
+        </div>
+      </section>
+    );
+  };
 
   return (
     <main className={`app-frame theme-${theme}`}>
-      <div className="app-shell">
-        <aside className="side-menu">
-          <div className="side-brand">
-            <h1>SafeTwin</h1>
-            <span>Origin -&gt; Recipient</span>
-          </div>
+      <aside className="action-bar">
+        <div className="brand">
+          <h1>SafeTwin</h1>
+          <span>Origin -&gt; Backup</span>
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme((current) => (current === 'light' ? 'dark' : 'light'))}
+          >
+            {theme === 'light' ? 'Dark mode' : 'Light mode'}
+          </button>
+        </div>
 
-          <section className="side-section">
-            <h2>Actions</h2>
-            <button type="button" onClick={() => scan()} disabled={isScanning}>
-              {isScanning ? <Loader2 className="spin" size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
-              Scan only
-            </button>
-            {showAdvancedControls ? (
-              <button type="button" onClick={() => scan('deep')} disabled={isScanning}>
-                <HardDrive size={16} aria-hidden="true" />
-                Deep Scan
-              </button>
-            ) : null}
-            {showAdvancedControls ? (
-              <>
-                <button
-                  className={selectionMode ? 'toolbar-active' : ''}
-                  type="button"
-                  onClick={() => {
-                    setSelectionMode((current) => !current);
-                    setSelectedPaths([]);
-                    setSelectedFolderPaths([]);
-                    setCleanupPreview(null);
-                  }}
-                >
-                  <CheckSquare size={16} aria-hidden="true" />
-                  Select
-                </button>
-              </>
-            ) : null}
-            {showAdvancedControls ? (
-              <>
-                <button
-                  className={cleanupMode ? 'toolbar-active' : ''}
-                  type="button"
-                  onClick={toggleCleanupMode}
-                >
-                  <Trash2 size={16} aria-hidden="true" />
-                  Cleanup Mode
-                </button>
-                <button type="button" onClick={() => setSettingsOpen((current) => !current)}>
-                  <Settings size={16} aria-hidden="true" />
-                  Settings
-                </button>
-              </>
-            ) : null}
-          </section>
+        <button
+          type="button"
+          disabled={!activePair || isBusy}
+          onClick={() => {
+            void runScan(activePair, 'deep');
+          }}
+        >
+          Full Scan
+        </button>
+        <button type="button" disabled={!activePair || missingFiles.length === 0 || isBusy} onClick={() => copyPaths(missingFiles.map((file) => file.relativePath))}>
+          Copy All
+        </button>
+        <button
+          type="button"
+          disabled={!activePair || selectedCopyCount === 0 || isBusy}
+          onClick={() => {
+            void copyPaths(selectedCopyPaths, selectedCopyFolderPaths);
+          }}
+        >
+          Copy Selected
+        </button>
+        <button
+          type="button"
+          disabled={!activePair || backupOnlyFiles.length === 0 || isBusy}
+          onClick={() => {
+            setCleanAllConfirmOpen(true);
+            setCleanAllConfirmText('');
+          }}
+        >
+          Clean All
+        </button>
+        <button
+          type="button"
+          disabled={!activePair || selectedDeleteCount === 0 || isBusy}
+          onClick={() => {
+            void deletePaths(selectedDeletePaths, selectedDeleteFolderPaths);
+          }}
+        >
+          Delete Selected
+        </button>
+        <button type="button" disabled={!originPath || !backupPath || isBusy} onClick={invertRoles}>
+          Invert
+        </button>
+        <button
+          type="button"
+          className="stop-button"
+          disabled={!operation || !['pending', 'running', 'paused'].includes(operation.operation.state)}
+          onClick={stopOperation}
+        >
+          Stop
+        </button>
 
-          <section className="side-section">
-            <h2>View</h2>
-            <label className="compact-field">
-              Show
-              <select
-                aria-label="View filter"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value as FilterKey)}
-              >
-                {filterOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {value === 'all' ? 'Full folder tree' : label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="search-box">
-              <Search size={15} aria-hidden="true" />
+        {cleanAllConfirmOpen ? (
+          <section className="selection-panel danger-panel">
+            <strong>Clean {backupOnlyFiles.length} extra files</strong>
+            <span>{formatBytes(cleanAllBytes)} will be moved from backup to Recycle Bin.</span>
+            <label>
+              Type CLEAN ALL
               <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search"
+                value={cleanAllConfirmText}
+                onChange={(event) => setCleanAllConfirmText(event.target.value)}
+                aria-label="Type CLEAN ALL to confirm Clean All"
               />
-            </div>
-            {showAdvancedControls ? (
-              <label className="compact-field">
-                Verify
-                <select
-                  aria-label="Verification level"
-                  value={verificationLevel}
-                  onChange={(event) => setVerificationLevel(event.target.value as VerificationLevel)}
-                >
-                  <option value="auto">Auto</option>
-                  <option value="basic">Size</option>
-                  <option value="strong">Hash</option>
-                </select>
-              </label>
-            ) : null}
-            <label className="mirror-toggle">
-              <input
-                type="checkbox"
-                checked={activePair?.mirrorNavigationEnabled ?? true}
-                disabled={!activePair}
-                onChange={(event) => updatePairSettings({ mirrorNavigationEnabled: event.target.checked })}
-              />
-              Mirror navigation
             </label>
-          </section>
-
-          {showAdvancedControls ? (
-          <section className="side-section">
-            <h2>Update Recipient</h2>
-            <span className="selection-summary">
-              {selectedPaths.length + selectedFolderPaths.length} selected / {formatBytes(selectedBytes)}
-            </span>
             <button
               type="button"
-              disabled={cleanupMode || missingSelectedPaths.length === 0}
-              onClick={() => createCopyQueue(missingSelectedPaths)}
+              disabled={!cleanAllConfirmed || isBusy}
+              onClick={() => deletePaths(backupOnlyFiles.map((file) => file.relativePath))}
             >
-              Back up selected missing files
+              Clean now
             </button>
-            <button type="button" onClick={selectVisibleEligible}>
-              {cleanupMode ? 'Select visible cleanup items' : 'Select visible missing files'}
+            <button
+              type="button"
+              onClick={() => {
+                setCleanAllConfirmOpen(false);
+                setCleanAllConfirmText('');
+              }}
+            >
+              Cancel
             </button>
-            <button type="button" disabled={selectedPaths.length === 0 && selectedFolderPaths.length === 0} onClick={clearSelection}>
-              Clear
-            </button>
-            {showAdvancedControls && cleanupMode ? (
+          </section>
+        ) : null}
+
+        {selectedCopyCount > 0 ? (
+          <section className="selection-panel">
+            <strong>{selectedCopyCount} copy items</strong>
+            <span>{formatBytes(selectedCopyBytes + selectedCopyFolderBytes)}</span>
+            <span>Press Copy Selected to copy checked items.</span>
+          </section>
+        ) : null}
+
+        {selectedDeleteCount > 0 ? (
+          <section className="selection-panel">
+            <strong>{selectedDeleteCount} delete items</strong>
+            <span>{formatBytes(selectedDeleteBytes + selectedDeleteFolderBytes)}</span>
+            <span>Press Delete Selected to clean checked items.</span>
+          </section>
+        ) : null}
+
+        <section className="counts">
+          <span>+ {missingFiles.length} missing</span>
+          <span>- {backupOnlyFiles.length} extra</span>
+          <span>-/+ {conflictFiles.length} different</span>
+        </section>
+      </aside>
+
+      <section className="workspace">
+        {actionMessage || operation ? (
+          <section className={`action-status ${operation ? `action-status-${operation.operation.state}` : ''}`}>
+            <div>
+              <strong>
+                {operation ? `${operationVerb(operation)} ${operation.operation.state}` : 'Action'}
+              </strong>
+              <span>{actionMessage}</span>
+            </div>
+            {operation ? (
               <>
-                <button type="button" disabled={cleanupSelectedFiles.length === 0 && selectedFolderPaths.length === 0} onClick={previewCleanup}>
-                  Cleanup preview
-                </button>
-                <button type="button" disabled={!cleanupPreview || cleanupPreview.filesSelected === 0} onClick={createCleanupQueue}>
-                  Cleanup selected
-                </button>
+                <span>
+                  {operation.totals.completedItems}/{operation.totals.totalItems} items
+                </span>
+                <span>
+                  {formatBytes(operation.totals.bytesDone)} / {formatBytes(operation.totals.bytesTotal)}
+                </span>
+                <span>{operationPercent}%</span>
               </>
             ) : null}
-            {showAdvancedControls ? (
-              <select
-                aria-label="More actions"
-                className="action-menu"
-                value=""
-                onChange={(event) => {
-                  runMoreAction(event.target.value);
-                  event.target.value = '';
-                }}
-              >
-                <option value="">More actions</option>
-                <option value="swap" disabled={!originPath || !backupPath || isScanning}>
-                  Swap roles
-                </option>
-                <option value="copyConflicts" disabled={cleanupMode || conflictSelectedFiles.length === 0}>
-                  Save selected conflicts as duplicates
-                </option>
-              </select>
-            ) : null}
           </section>
-          ) : null}
+        ) : null}
 
-          {showAdvancedControls ? (
-          <section className="side-section side-theme">
-            <button type="button" title="Light theme" onClick={() => setTheme('light')}>
-              <Sun size={16} aria-hidden="true" />
-              Light
-            </button>
-            <button type="button" title="Dark theme" onClick={() => setTheme('dark')}>
-              <Moon size={16} aria-hidden="true" />
-              Dark
-            </button>
-          </section>
-          ) : null}
-        </aside>
+        {scanProgress || isBusy ? (
+          <div className="status-line">
+            <Loader2 className="spin" size={15} aria-hidden="true" />
+            <span>{scanProgress?.message ?? 'Working...'}</span>
+          </div>
+        ) : null}
 
-        <section className="main-workspace">
-          <section className="status-strip">
-        <span>Last scan: {formatDate(activePair?.lastScanAt ?? null)}</span>
-        <span>Last backup: {formatDate(lastCopyAt)}</span>
-        <span>
-          Missing in recipient: {statusSummary.missingInBackup} files / {formatBytes(statusSummary.totalMissingSize)}
-        </span>
-        {showAdvancedControls ? (
-          <>
-            <span>Last cleanup: {formatDate(lastCleanupAt)}</span>
+        {error ? <div className="error-line">{error}</div> : null}
+
+        <section className="panes">
+          {renderPane('origin', originEntries, originPath, backupEntries)}
+          {renderPane('backup', backupEntries, backupPath, originEntries)}
+        </section>
+
+        {operation ? (
+          <section className="operation-line">
+            <strong>{operation.operation.type === 'copy' ? 'Copy' : 'Delete'}: {operation.operation.state}</strong>
             <span>
-              Backup-only: {statusSummary.backupOnly} files / {formatBytes(statusSummary.totalBackupOnlySize)}
+              {operation.totals.completedItems}/{operation.totals.totalItems} files
             </span>
-            <span>Conflicts: {statusSummary.conflicts}</span>
-            <span>Ignored: {statusSummary.ignored}</span>
-            <span>Skipped: {skippedCount(statusSummary)}</span>
-          </>
+            <span>{formatBytes(operation.totals.bytesDone)} / {formatBytes(operation.totals.bytesTotal)}</span>
+          </section>
         ) : null}
       </section>
 
-      {showAdvancedControls && reminderMessage ? <div className="reminder-bar">{reminderMessage}</div> : null}
-
-      {scanProgress ? (
-        <section className="scan-progress">
-          <div className="scan-progress-main">
-            <Loader2 className={isScanning ? 'spin' : ''} size={15} aria-hidden="true" />
-            <strong>{scanProgress.message}</strong>
-            <span>{scanProgress.mode === 'deep' ? 'Deep scan' : 'Scan'}</span>
-            <span>{scanProgress.side}</span>
-            <span>{scanProgress.filesDiscovered} files</span>
-            <span>{scanProgress.foldersDiscovered} folders</span>
-            <span>{scanProgress.ignored} ignored</span>
-            <span>{scanProgress.skipped} skipped</span>
+      {itemContextMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: itemContextMenu.x, top: itemContextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="context-menu-title">
+            <strong>{itemContextMenu.entry.name}</strong>
+            <span>
+              {itemContextMenu.side === 'origin' ? 'Origin' : 'Backup'} {itemContextMenu.entry.kind}
+            </span>
           </div>
-          <p>{scanProgress.currentPath || 'Preparing folders'}</p>
-        </section>
-      ) : null}
-
-      {error ? (
-        <div className="error-banner">
-          <AlertTriangle size={16} aria-hidden="true" />
-          {error}
+          <button
+            type="button"
+            onClick={() => {
+              window.safetwin.showItemInFolder(itemContextMenu.entry.absolutePath);
+              setItemContextMenu(null);
+            }}
+          >
+            Show in folder
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard.writeText(itemContextMenu.entry.absolutePath);
+              setItemContextMenu(null);
+            }}
+          >
+            Copy path
+          </button>
+          <button
+            type="button"
+            className="context-danger"
+            onClick={() => {
+              const menu = itemContextMenu;
+              setItemContextMenu(null);
+              void deleteContextItem(menu);
+            }}
+          >
+            Move to Recycle Bin
+          </button>
         </div>
       ) : null}
-
-      {copyPreview ? (
-        <section className="operation-preview">
-          <strong>Backup queued</strong>
-          <span>Files in queue: {copyPreview.filesSelected}</span>
-          {showAdvancedControls ? <span>Conflicts as duplicates: {copyPreview.conflictsSelected}</span> : null}
-          <span>Total size: {formatBytes(copyPreview.totalSize)}</span>
-          <span>Action: backing up selected missing Origin files to Recipient; existing Recipient files stay preserved</span>
-        </section>
-      ) : null}
-
-      {showAdvancedControls && cleanupPreview ? (
-        <section className="cleanup-preview">
-          <strong>Cleanup preview</strong>
-          <span>Files selected: {cleanupPreview.filesSelected}</span>
-          <span>Folders selected: {cleanupPreview.foldersSelected}</span>
-          <span>Total size: {formatBytes(cleanupPreview.totalSize)}</span>
-          <span>Action: move selected backup-only items to Recycle Bin</span>
-        </section>
-      ) : null}
-
-      <section className="path-panels">
-        {renderPane('origin', leftRows, leftPath, originPath)}
-        <div className="pane-divider" />
-        {renderPane('backup', rightRows, rightPath, backupPath)}
-      </section>
-
-      {showAdvancedControls && settingsOpen ? (
-        <aside className="settings-panel">
-          <header>
-            <strong>Settings</strong>
-            <button type="button" title="Close settings" onClick={() => setSettingsOpen(false)}>
-              <X size={16} aria-hidden="true" />
-            </button>
-          </header>
-
-          <section>
-            <h2>Reminder interval</h2>
-            {[null, 7, 14, 30].map((interval) => (
-              <label className="setting-row" key={interval ?? 'off'}>
-                <input
-                  type="radio"
-                  checked={(activePair?.reminderIntervalDays ?? null) === interval}
-                  disabled={!activePair}
-                  onChange={() => updatePairSettings({ reminderIntervalDays: interval })}
-                />
-                {interval === null ? 'Off' : `Every ${interval} days`}
-              </label>
-            ))}
-          </section>
-
-          <section>
-            <h2>Ignore rules</h2>
-            {groupedIgnoreRules.map(([category, rules]) => (
-              <label className="ignore-rule-row" key={category}>
-                <input
-                  type="checkbox"
-                  checked={rules.every((rule) => rule.enabled)}
-                  onChange={(event) =>
-                    window.safetwin
-                      .setIgnoreRuleCategoryEnabled(category, event.target.checked)
-                      .then(setIgnoreRules)
-                      .catch((ignoreError: unknown) => {
-                        setError(toFriendlyError(ignoreError, 'Could not update ignore rules.'));
-                      })
-                  }
-                />
-                <span>{category}</span>
-                <small>{rules.map((rule) => rule.pattern).join(', ')}</small>
-              </label>
-            ))}
-          </section>
-
-          <section>
-            <button className="link-button" type="button" onClick={() => setIgnoredOpen((current) => !current)}>
-              Ignored files in last scan: {ignoredFiles.length}
-              <ChevronRight size={14} aria-hidden="true" />
-            </button>
-            {ignoredOpen ? (
-              <div className="ignored-list">
-                {ignoredFiles.map((file) => (
-                  <div className="ignored-row" key={`${file.path}-${file.reason}`}>
-                    <span>{file.path}</span>
-                    <small>{file.reason}</small>
-                  </div>
-                ))}
-                {ignoredFiles.length === 0 ? <div className="empty-pane">No ignored files in the last scan</div> : null}
-              </div>
-            ) : null}
-          </section>
-        </aside>
-      ) : null}
-
-      {operation ? (
-        <section className="operation-drawer">
-          <div className="drawer-title">
-            <strong>{operation.operation.type === 'copy' ? 'Backup queue' : 'Cleanup queue'}</strong>
-            <span>{operation.operation.state}</span>
-          </div>
-          <div className="drawer-actions">
-            <button type="button" title="Start" onClick={() => runOperationCommand('start')} disabled={!['pending', 'failed'].includes(operation.operation.state)}>
-              <Play size={15} aria-hidden="true" />
-            </button>
-            <button type="button" title="Pause" onClick={() => runOperationCommand('pause')} disabled={operation.operation.state !== 'running'}>
-              <Pause size={15} aria-hidden="true" />
-            </button>
-            <button type="button" title="Resume" onClick={() => runOperationCommand('resume')} disabled={operation.operation.state !== 'paused'}>
-              <Play size={15} aria-hidden="true" />
-            </button>
-            <button type="button" title="Cancel" onClick={() => runOperationCommand('cancel')} disabled={!['pending', 'running', 'paused'].includes(operation.operation.state)}>
-              <Square size={15} aria-hidden="true" />
-            </button>
-            <button type="button" title="Retry failed" onClick={() => runOperationCommand('retry')} disabled={operation.totals.failedItems === 0 && operation.totals.cancelledItems === 0}>
-              <RotateCcw size={15} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="drawer-summary">
-            <span>
-              {operation.totals.completedItems}/{operation.totals.totalItems} items
-            </span>
-            <span>
-              {formatBytes(operation.totals.bytesDone)} / {formatBytes(operation.totals.bytesTotal)}
-            </span>
-            <span>{progressPercent(operation.totals.bytesDone, operation.totals.bytesTotal)}%</span>
-            <span>{formatBytes(operation.totals.currentSpeedBytesPerSecond)}/s</span>
-          </div>
-          <div className="drawer-items">
-            {operation.items.slice(0, 10).map((item) => (
-              <div className="drawer-item" key={item.id}>
-                <span className={`queue-state queue-state-${item.state}`}>{item.state}</span>
-                <span title={`${item.sourcePath ?? ''}\n${item.destinationPath ?? ''}`}>{item.relativePath}</span>
-                <small>{progressPercent(item.bytesDone, item.bytesTotal)}%</small>
-                <small>{item.verificationState}</small>
-                <button
-                  type="button"
-                  title="Open source folder"
-                  disabled={!item.sourcePath}
-                  onClick={() => item.sourcePath && window.safetwin.showItemInFolder(item.sourcePath)}
-                >
-                  <FolderOpen size={14} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  title="Open recipient folder"
-                  disabled={!item.destinationPath}
-                  onClick={() => item.destinationPath && window.safetwin.showItemInFolder(item.destinationPath)}
-                >
-                  <HardDrive size={14} aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-        </section>
-      </div>
     </main>
   );
 };

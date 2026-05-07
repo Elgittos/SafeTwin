@@ -51,6 +51,7 @@ describe('IgnoreRuleService', () => {
 
     expect(service.match('Documents/~$report.docx')).toBe('Office lock file');
     expect(service.match('Downloads/movie.crdownload')).toBe('Partial download');
+    expect(service.match('.safetwin-trash/file.txt')).toBe('SafeTwin local trash folder');
     expect(service.match('Photos/cat.jpg')).toBeNull();
   });
 });

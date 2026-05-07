@@ -8,6 +8,7 @@ import type {
   CreateSingleCopyOperationInput,
   SaveFolderPairInput,
   ScanMode,
+  TrashItemInput,
   UpdateFolderPairSettingsInput,
 } from '../shared/types';
 import { initializeSchema } from './db/schema';
@@ -16,6 +17,7 @@ import { IgnoreRuleService } from './ignore/ignoreRules';
 import { OperationLogger } from './operations/operationLogger';
 import { OperationQueueService } from './operations/operationQueueService';
 import { isProtectedWindowsDirectoryName } from './platform/protectedWindowsPaths';
+import { trashItemResilient } from './platform/trashItem';
 import { ScannerService } from './scanner/scannerService';
 import { summarizeDirectoryDifferences } from './scanner/quickDiffService';
 import { FolderPairService } from './services/folderPairService';
@@ -36,7 +38,9 @@ export const registerIpcHandlers = async (): Promise<void> => {
   const scanner = new ScannerService(db, ignoreRules);
   const operationLogger = new OperationLogger(db, getOperationsLogPath());
   const operations = new OperationQueueService(db, folderPairs, scanner, operationLogger, {
-    trashItem: (itemPath: string) => shell.trashItem(itemPath),
+    trashItem: async (itemPath: string) => {
+      await trashItemResilient(itemPath);
+    },
   });
   await operations.recoverInterruptedOperations();
 
@@ -191,5 +195,18 @@ export const registerIpcHandlers = async (): Promise<void> => {
 
   ipcMain.handle('safetwin:show-item-in-folder', (_event, itemPath: string) => {
     shell.showItemInFolder(itemPath);
+  });
+
+  ipcMain.handle('safetwin:trash-item', async (_event, input: TrashItemInput) => {
+    const resolvedRoot = path.resolve(input.rootPath);
+    const resolvedItem = path.resolve(input.itemPath);
+    const relativeFromRoot = path.relative(resolvedRoot, resolvedItem);
+
+    if (!relativeFromRoot || relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+      throw new Error('Can only delete items inside the selected folder.');
+    }
+
+    await fs.stat(resolvedItem);
+    return trashItemResilient(resolvedItem, path.join(resolvedRoot, '.safetwin-trash'));
   });
 };
