@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SafeTwin Local Windows Signing</title>
+    <style>
+      @page {
+        margin: 18mm;
+      }
+
+      body {
+        color: #172033;
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 11.5pt;
+        line-height: 1.45;
+      }
+
+      h1 {
+        margin: 0 0 4mm;
+        color: #0b3f4a;
+        font-size: 26pt;
+      }
+
+      h2 {
+        margin: 8mm 0 2mm;
+        color: #0b3f4a;
+        font-size: 15pt;
+      }
+
+      p {
+        margin: 0 0 3mm;
+      }
+
+      ul {
+        margin: 0 0 4mm 5mm;
+        padding: 0;
+      }
+
+      li {
+        margin: 0 0 1.8mm;
+      }
+
+      code,
+      pre {
+        font-family: Consolas, "Courier New", monospace;
+      }
+
+      pre {
+        margin: 2mm 0 4mm;
+        padding: 3mm;
+        border: 1px solid #d5dde8;
+        border-radius: 4px;
+        background: #f4f7fb;
+        white-space: pre-wrap;
+      }
+
+      .note {
+        margin: 4mm 0;
+        padding: 3mm;
+        border-left: 4px solid #1d6f52;
+        background: #eef8f2;
+      }
+
+      .warning {
+        margin: 4mm 0;
+        padding: 3mm;
+        border-left: 4px solid #b45a00;
+        background: #fff5e8;
+      }
+
+      .muted {
+        color: #66758b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SafeTwin Local Windows Signing</h1>
+    <p class="muted">Personal-use signing notes for Luis Chaname.</p>
+
+    <h2>What Problem This Solves</h2>
+    <p>
+      Windows blocks unknown unsigned apps because it cannot tell who created the executable or whether it was modified
+      after it was built. SafeTwin is your own app, but Windows still treats an unsigned installer like an unknown file.
+    </p>
+    <p>
+      The local signing setup gives your Windows user account a certificate that says: this SafeTwin build was signed by
+      your local trusted certificate.
+    </p>
+
+    <div class="note">
+      This is free and useful for your own machine. It is not the same as a paid public code-signing certificate.
+    </div>
+
+    <h2>What Was Added</h2>
+    <ul>
+      <li><code>scripts/sign-local-windows.ps1</code> creates or reuses a local SafeTwin code-signing certificate.</li>
+      <li>The certificate subject is <code>CN=Luis Chaname SafeTwin Local Code Signing</code>.</li>
+      <li>The certificate is stored in <code>Cert:\CurrentUser\My</code>.</li>
+      <li>The public certificate is trusted in <code>Cert:\CurrentUser\Root</code>.</li>
+      <li>The public certificate is trusted in <code>Cert:\CurrentUser\TrustedPublisher</code>.</li>
+      <li>Electron Forge runs the signing script during Windows builds.</li>
+    </ul>
+
+    <h2>What Gets Signed</h2>
+    <p>During <code>npm.cmd run make</code>, the build now signs:</p>
+    <pre>out\SafeTwin-win32-x64\SafeTwin.exe
+out\make\squirrel.windows\x64\SafeTwinSetup.exe</pre>
+
+    <h2>How To Verify A Signature</h2>
+    <p>Run this in PowerShell:</p>
+    <pre>Get-AuthenticodeSignature "C:\Users\LuisDev\Desktop\SafeTwinSetup.exe" | Format-List</pre>
+    <p>The important result is:</p>
+    <pre>Status: Valid
+SignerCertificate Subject: CN=Luis Chaname SafeTwin Local Code Signing</pre>
+
+    <h2>What This Does Not Solve</h2>
+    <div class="warning">
+      A local self-signed certificate only helps machines where that certificate has been trusted. It does not make the
+      app automatically trusted by strangers on Reddit, GitHub, or another Windows computer.
+    </div>
+    <p>
+      For public trust, SafeTwin would need a public code-signing option such as Microsoft Azure Artifact Signing,
+      Microsoft Store signing, or a traditional code-signing certificate.
+    </p>
+
+    <h2>Why This Is Still Useful</h2>
+    <ul>
+      <li>You do not need to pay just to run your own app.</li>
+      <li>Your local SafeTwin installer and app are no longer completely unsigned.</li>
+      <li>Future builds repeat the same signing step automatically.</li>
+      <li>You can still move to public signing later without changing the app architecture.</li>
+    </ul>
+
+    <h2>How To Remove The Local Trust Later</h2>
+    <p>If you ever want to remove the local certificate, open PowerShell and inspect matching certificates:</p>
+    <pre>Get-ChildItem Cert:\CurrentUser\My, Cert:\CurrentUser\Root, Cert:\CurrentUser\TrustedPublisher |
+  Where-Object { $_.Subject -eq "CN=Luis Chaname SafeTwin Local Code Signing" }</pre>
+    <p>Then remove the matching certificates carefully:</p>
+    <pre>Get-ChildItem Cert:\CurrentUser\My, Cert:\CurrentUser\Root, Cert:\CurrentUser\TrustedPublisher |
+  Where-Object { $_.Subject -eq "CN=Luis Chaname SafeTwin Local Code Signing" } |
+  Remove-Item</pre>
+
+    <h2>Bottom Line</h2>
+    <p>
+      Local signing is the right free fix for personal use. Public signing is only needed when SafeTwin is ready for
+      wider distribution to people who do not already trust your local certificate.
+    </p>
+  </body>
+</html>

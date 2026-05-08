@@ -66,6 +66,9 @@ Run `SafeTwinSetup.exe` to install SafeTwin like a normal Windows app.
 
 This is for personal use only right now. Public distribution should wait until code signing, release notes, and installer update strategy are decided.
 
+For the free local signing setup used by personal Windows builds, see
+[SafeTwin Local Windows Signing](docs/SafeTwin-local-signing.pdf).
+
 ## Navigation
 
 SafeTwin has two folder navigation modes:
