@@ -6,6 +6,28 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+
+const signLocalWindowsFile = (filePath: string): void => {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path.resolve('scripts/sign-local-windows.ps1'),
+      '-Path',
+      filePath,
+    ],
+    { stdio: 'inherit' },
+  );
+};
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -22,6 +44,24 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {},
+  hooks: {
+    postPackage: async (_forgeConfig, packageResult) => {
+      for (const outputPath of packageResult.outputPaths) {
+        signLocalWindowsFile(path.join(outputPath, 'SafeTwin.exe'));
+      }
+    },
+    postMake: async (_forgeConfig, makeResults) => {
+      for (const result of makeResults) {
+        for (const artifact of result.artifacts) {
+          if (artifact.endsWith('.exe')) {
+            signLocalWindowsFile(artifact);
+          }
+        }
+      }
+
+      return makeResults;
+    },
+  },
   makers: [
     new MakerSquirrel({
       name: 'SafeTwin',
